@@ -3,6 +3,7 @@ import pandas as pd
 import random
 from ortools.sat.python import cp_model
 from ortools.linear_solver import pywraplp
+from matplotlib import pyplot as plt
 
 class Course:
     course_list: list = list()
@@ -94,7 +95,7 @@ class Course:
         Course.course_array = np.column_stack([Course.course_array, teacher_course_array,  np.array(course_year_list)])
 
         Course.courses = pd.DataFrame(Course.course_array, columns=["id", "n_lessons", "n_students", "teacher", "year"], index=None)
-        Course.display()
+        #Course.display()
 
     @staticmethod
     def display():
@@ -187,6 +188,58 @@ class TimeSlot:
     def display():
         print(TimeSlot.day)
 
+def generate_targets(
+        area: np.ndarray,
+        seed: int = None,
+        shape: tuple[int, int] = (50, 2),
+        show = False
+        ):
+    deployment_bbox = area.reshape(-1, 2)
+    X = np.empty(shape)
+    n, d = shape
+
+    for j in range(d):
+        X[:, j] = np.round(np.random.uniform(deployment_bbox[j, 0], deployment_bbox[j, 1], size=n), 0)
+
+    if show:
+        plt.scatter(X[:, 0], X[:, 1], c='r', marker='*')
+        plt.scatter(X[:, 0], X[:, 1], c='y', marker='+')
+        plt.show()
+    
+    return X, area
+
+
+def generate_bboxes(n, m, space_min=0, space_max=100):
+    grid_size = int(np.sqrt(n))
+    step = (space_max - space_min) / grid_size
+    
+    centers = [
+        [space_min + (i + 0.5) * step, space_min + (j + 0.5) * step]
+        for i in range(grid_size)
+        for j in range(grid_size)
+    ]
+    bounding_boxes = np.array([
+        [x - m, x + m, y - m, y + m] for x, y in centers
+    ])
+    
+    return np.array(centers), bounding_boxes
+
+
+def distribute_rooms(room_ids, faculty_count):
+    #random.shuffle(room_ids)
+    faculty_rooms = [[] for _ in range(faculty_count)]
+    
+    chunk_size = len(room_ids) // faculty_count
+    remainder = len(room_ids) % faculty_count
+    
+    start = 0
+    for i in range(faculty_count):
+        extra = 1 if i < remainder else 0
+        end = start + chunk_size + extra
+        faculty_rooms[i] = room_ids[start:end]
+        start = end
+    
+    return faculty_rooms
 
 class Room:
     rooms: pd.DataFrame
@@ -194,6 +247,8 @@ class Room:
     ids: np.ndarray
     capacities: np.ndarray
     room_array: np.ndarray
+    room_locations: np.ndarray
+    Faculty_ids: list = list()
     
     #day_idxs: np.ndarray = np.zeros_like(ids)
     # type_id : np.ndarray
@@ -202,21 +257,54 @@ class Room:
             self,
             id: int,
             capacity: int,
-            slot: list[TimeSlot] = None
+            location: np.ndarray,
+            faculty_id: int
             # type_idx
     ):
         self.id = int(id)
         self.capacity = int(capacity)
+        self.location = location
+        self.faculty_id = faculty_id
+        self.x = int(location[0])
+        self.y = int(location[1])
 
-    def generate_rooms(capacities: tuple[tuple[int, int]]):
-        Room.ids = np.arange(1, sum([room_count for room_count, _ in capacities]) + 1)
+    def generate_rooms(capacities: tuple[tuple[int, int]], faculty: int):
+        m = 100
+        centers, bboxes = generate_bboxes(faculty, 15, 0, 100)
+
+        Room.ids = np.arange(0, sum([room_count for room_count, _ in capacities]))
         Room.capacities = np.hstack([[seat_count] * room_count for room_count, seat_count in capacities])
+        np.random.shuffle(Room.capacities)
+        
+        faculty_rooms = distribute_rooms([int(id) for id in Room.ids], faculty_count=faculty)
+        print(faculty_rooms)
 
-        Room.room_list = [Room(id, capacity) for id, capacity in zip(Room.ids, Room.capacities)]
+        faculty_ids = []
+        for id in Room.ids:
+            for i, subset in enumerate(faculty_rooms):
+                if id in subset:
+                    faculty_ids.append(i)
+
+        Room.Faculty_ids = faculty_ids
+
+        rooms = []
+        for i in range(faculty):
+            area = bboxes[i].reshape(2, 2)
+            room_locations, _ = generate_targets(area=bboxes[i], seed=None, shape=(len(faculty_rooms[i]), 2))
+            rooms.append(room_locations)
+        rooms = np.vstack(rooms)
+        Room.room_locations = rooms
+
+        Room.room_list = [Room(id, capacity, locations, faculty_id) for id, capacity, locations, faculty_id in zip(Room.ids, Room.capacities, Room.room_locations, faculty_ids)]
         Room.room_array = np.column_stack([Room.ids, Room.capacities])
 
-        Room.rooms = pd.DataFrame(Room.room_array, columns=["id", "capacity"], index=None)
-        #Room.display()
+        Room.rooms = pd.DataFrame({
+            "id": Room.ids,
+            "capacity": Room.capacities,
+            "location": [list(loc) for loc in rooms],
+            "faculty_id": faculty_ids
+        })
+        Room.display()
 
     def display():
         print(Room.rooms)
@@ -290,12 +378,13 @@ def display_interval_results(courses, rooms, solver,
                   f"starts at slot {start_val}, length={blk_size}, "
                   f"Room={assigned_room}")
 
+from collections import defaultdict
 
 def build_timetable(courses, rooms, horizon, solver, start_vars, is_in_room_vars, n_days):
     # Create an empty DataFrame with rows=0..(horizon-1), columns=room IDs
     room_ids = [r.id for r in rooms]
     timetable = pd.DataFrame("", index=range(horizon), columns=room_ids)
-
+    unique_rooms = defaultdict(list)
     # Fill the big timetable
     for c in courses:
         for i, blk_size in enumerate(c.get_blocks):
@@ -303,9 +392,24 @@ def build_timetable(courses, rooms, horizon, solver, start_vars, is_in_room_vars
             # Which room?
             for r in rooms:
                 if solver.Value(is_in_room_vars[(c.id, i, r.id)]) == 1:
+                    unique_rooms[r.id].append(blk_size)
                     # Fill [start_val..start_val+blk_size-1]
                     for t in range(start_val, start_val + blk_size):
                         timetable.at[t, r.id] = f"C{c.id}({c.year}:{c.n_students}:{c.teacher.id})"
+
+    print(f"Unique Rooms: {len(unique_rooms)}")
+    times_used = []
+    total_block_usage = []
+    room_usage = {}
+    for id, block_lengths in unique_rooms.items():
+        times_used.append(len(block_lengths))
+        total_block_usage.append(sum(block_lengths))
+    
+    print(f"number of rooms used: {len(times_used)}")
+    print(f"sum times used: {(sum(times_used))}")
+    print(f"sum total block usage: {(sum(total_block_usage))}")
+
+
 
     # Now split timetable into n_days parts
     import datetime
@@ -319,7 +423,7 @@ def build_timetable(courses, rooms, horizon, solver, start_vars, is_in_room_vars
         end_row   = (d + 1) * day_length
         day_df = timetable.iloc[start_row:end_row, :].copy()
         day_df.index = time_indexes
-        day_df.columns = [f"Rm{rooms[i].id}({rooms[i].capacity})" for i in range(len(rooms))]
+        day_df.columns = [f"Rm{rooms[i].id}({rooms[i].capacity}[F{rooms[i].faculty_id}])" for i in range(len(rooms))]
         day_tables.append(day_df)
         
         
@@ -601,7 +705,7 @@ def main_multi_day():
     off_by_day[-1] = off_by_day[-1] + [5]
 
     TimeSlot.generate_week(num_days, slots_per_day, off_by_day)
-    Room.generate_rooms(((4, 48), (3, 36), (2, 72), (1, 90)))
+    Room.generate_rooms(((4, 48), (3, 36), (2, 72), (1, 90)), year)
     Teacher.generate_teachers(n_teachers)
     Course.generate_courses(28, (2,7), (15,90), Teacher.teachers)
 
@@ -610,7 +714,6 @@ def main_multi_day():
     R = Room
     P = Teacher
 
-    
     C_subsets = Course.years_subsets
     print(f"course_ids: {[c.id for subset in C_subsets for c in subset]}")
     print(f"C_subsets: {[c.year for subset in C_subsets for c in subset]}")
@@ -625,9 +728,10 @@ def main_multi_day():
     start_vars = {}
     is_in_rooms = {}
 
+
     all_intervals_for_subset = [[] for _ in C_subsets]
     all_intervals_for_teachers = [[] for _ in range(n_teachers)]
-
+    seat_utilization_terms = [] # Obj func
     for c in Course.course_list:
         for i, block_size in enumerate(c.blocks):
 
@@ -645,16 +749,26 @@ def main_multi_day():
             in_room_bools = []
             for r in Room.room_list:
                 in_r = model.NewBoolVar(f"inRoom_c{c.id}_b{i}_r{r.id}")
+                model.Add(r.capacity >= c.n_students).OnlyEnforceIf(in_r) # Encorce capacity(r) > n_students(c)
                 in_room_bools.append(in_r)
                 is_in_rooms[(c.id, i, r.id)] = in_r
 
                 opt_interval = model.NewOptionalIntervalVar(start_var, block_size, end_var,
                                                             in_r, f"optinterval_c{c.id}_b{i}_r{r.id}")
                 all_intervals_per_room[r.id].append(opt_interval)
+
+                # Objective function to minimize wasted space
+                wasted_capacity = r.capacity - c.n_students
+                seat_utilization_terms.append(is_in_rooms[(c.id, i, r.id)] * wasted_capacity)
+                #wasted_ration = c.n_students / r.capacity
+                #seat_utilization_terms.append(is_in_rooms[(c.id, i, r.id)] * wasted_ration)
+
             
             model.Add(sum(in_room_bools) == 1)
             start_vars[(c.id, i)] = start_var
 
+
+    #model.Minimize(sum(seat_utilization_terms)) # Objective function
     # Build off_chunks with day-based logic => just returns a list of (start_off, end_off) in [0..horizon)
     off_chunks = get_off_chunks(TimeSlot.slot_list)
 
@@ -681,6 +795,84 @@ def main_multi_day():
                 blocks_in_day_lits.append(day_c_i_d)
             model.Add(sum(blocks_in_day_lits) <= 1)
 
+
+    room_used = {r.id: model.NewBoolVar(f"room_used_{r.id}") for r in Room.room_list}
+    for r in R.room_list:
+        assignments_in_room = []
+        for c in Course.course_list:
+            for i, blk_size in enumerate(c.blocks):
+                key = (c.id, i, r.id)
+                if key in is_in_rooms:
+                    assignments_in_room.append(is_in_rooms[key])
+        model.AddMaxEquality(room_used[r.id], assignments_in_room)
+    room_usage_terms = [room_used[r.id] for r in Room.room_list]
+
+    central_x = {}
+    central_y = {}
+    for s, subset in enumerate(C_subsets):
+        for d in range(num_days):
+            central_x[(s, d)] = model.NewIntVar(0, 100, f"central_x_subset{s}_day{d}")
+            central_y[(s, d)] = model.NewIntVar(0, 100, f"central_y_subset{s}_day{d}")
+    
+    abs_diff_x = {}
+    abs_diff_y = {}
+    for s, subset in enumerate(C_subsets):
+        for d in range(num_days):
+            for c in subset:
+                abs_diff_x[(c.id, s, d)] = model.NewIntVar(0, 100, f"abs_diff_x_c{c.id}_sub{s}_day{d}")
+                abs_diff_y[(c.id, s, d)] = model.NewIntVar(0, 100, f"abs_diff_y_c{c.id}_sub{s}_day{d}")
+                # constraints
+                for b, _ in enumerate(c.blocks):
+                    for r in R.room_list:
+                        model.Add(abs_diff_x[(c.id, s, d)] >= r.x * is_in_rooms[(c.id, b, r.id)] - central_x[(s, d)])
+                        model.Add(abs_diff_x[(c.id, s, d)] >= central_x[(s, d)] - r.x * is_in_rooms[(c.id, b, r.id)])
+                        model.Add(abs_diff_y[(c.id, s, d)] >= r.y * is_in_rooms[(c.id, b, r.id)] - central_y[(s, d)])
+                        model.Add(abs_diff_y[(c.id, s, d)] >= central_y[(s, d)] - r.y * is_in_rooms[(c.id, b, r.id)])
+
+    distance_terms = []
+    for s, subset in enumerate(C_subsets):
+        for d in range(num_days):
+            for c in subset:
+                distance_terms.append(abs_diff_x[(c.id, s, d)] + abs_diff_y[(c.id, s, d)])
+    #model.Minimize(sum(distance_terms))
+
+    ### Minimize idle between subset c in day d
+    earliest = {}
+    latest = {}
+    for s, subset in enumerate(C_subsets):
+        for d in range(num_days):
+            earliest[(s, d)] = model.NewIntVar(0, horizon, f"earliest_sub{s}_day{d}")
+            latest[(s, d)] = model.NewIntVar(0, horizon, f"latest_sub{s}_day{d}")
+
+    for s, subset in enumerate(C_subsets):
+        for d in range(num_days):
+            for c in subset:
+                for b, block_size in enumerate(c.blocks):
+                    model.Add(earliest[(s, d)] <= start_vars[(c.id, b)])
+                    model.Add(latest[(s, d)] >= start_vars[(c.id, b)] + block_size)
+    
+    span = {}
+    for s, subset in enumerate(C_subsets):
+        for d in range(num_days):
+            span[(s, d)] = model.NewIntVar(0, horizon, f"span_sub{s}_day{d}")
+            model.Add(span[(s, d)] == latest[(s, d)] - earliest[(s, d)])
+    span_terms = [span[(s,d)] for s in range(len(C_subsets)) for d in range(num_days)]
+
+    idle_time_weight = 2.0
+    seat_utilization_weight = 8.0
+    room_usage_weight = 2.0
+    distance_weight = 5.0
+
+    objective_expression = room_usage_weight * sum(room_usage_terms)
+    objective_expression += seat_utilization_weight * sum(seat_utilization_terms)
+    objective_expression += distance_weight * sum(distance_terms)
+    objective_expression += idle_time_weight * sum(span_terms)
+    model.Minimize(objective_expression) #Objective function
+    #objective_expression = sum(room_usage_terms)
+    #model.Minimize(sum(seat_utilization_terms)) #Objective function
+    #model.Minimize(sum(room_used[r.id] for r in Room.room_list)*0.8) #Objective function
+    
+
     for r in Room.room_list:
         for (start_off, end_off) in off_chunks:
             off_int = model.NewIntervalVar(start_off, end_off - start_off, end_off,
@@ -696,17 +888,17 @@ def main_multi_day():
     for p in P.ids:
         model.AddNoOverlap(all_intervals_for_teachers[p])
 
-        
+    
 
     # Solve
     solver = cp_model.CpSolver()
     status = solver.Solve(model)
 
-    for c in C.course_list:
+    """ for c in C.course_list:
         for i, blk_size in enumerate(c.get_blocks):
             s_val = solver.Value(start_vars[(c.id, i)])
             d_val = solver.Value(day_vars[(c.id, i)])
-            print(f"Course={c.id}, block={i}, start={s_val}, day={d_val}, subset={find_subset_of_course(c, C_subsets)}, teacher: {c.teacher.id}")
+            print(f"Course={c.id}, block={i}, start={s_val}, day={d_val}, subset={find_subset_of_course(c, C_subsets)}, teacher: {c.teacher.id}") """
 
     print(f"111 Number lessons: {C.courses['n_lessons'].sum()}")
     if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
@@ -728,6 +920,10 @@ def main_multi_day():
         print("No solution found (status={}).".format(status))
 
 if __name__ == "__main__":
+    seed = None
+    np.random.seed(seed)
+    random.seed(seed)   
+
     #main()
     #main2()
     #main3()
