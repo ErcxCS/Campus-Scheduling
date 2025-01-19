@@ -11,7 +11,7 @@ class Course:
     n_lessons: np.ndarray
     n_students: np.ndarray
     course_array: np.ndarray
-    teachers: list
+    years_subsets: list[list] = list(list())
 
     def __init__(
         self,
@@ -19,16 +19,17 @@ class Course:
         n_lessons: int,
         n_students: int,
         teacher = None,
-        cr_index: int = None,
+        year: int = None,
     ):
         self.id = int(id)
         self.n_lessons = int(n_lessons)
         self.n_students = int(n_students)
         self.teacher = teacher
         self.teacher.add_course(self)
-        self.cr_index = cr_index
+        self.year = year
 
         self.blocks = []
+        self.blocks = self.get_blocks
 
 
     @property
@@ -74,25 +75,35 @@ class Course:
         Course.n_students = np.random.randint(*student_count, (n_courses,))
         Course.course_array = np.column_stack([Course.ids, Course.n_lessons, Course.n_students])
         teacher_course_list = []
+        course_year_list = []
+        n_years = 4
 
-        for course in Course.course_array:
+        for i, course in enumerate(Course.course_array):
+            course_per_year = n_courses // n_years
+            year = i // course_per_year
             id, n_lessons, n_students = course
-            new_course = Course(id, n_lessons, n_students, teacher=random.choice(teachers))
+            new_course = Course(id, n_lessons, n_students, teacher=random.choice(teachers), year=year)
+            if len(Course.years_subsets) < year + 1:
+                Course.years_subsets.append([])
+            Course.years_subsets[year].append(new_course)
             Course.course_list.append(new_course)
+            course_year_list.append(new_course.year)
             teacher_course_list.append(new_course.teacher.id)
-        teacher_course_array = np.array(teacher_course_list)
-        Course.course_array = np.column_stack([Course.course_array, teacher_course_array])
 
-        Course.courses = pd.DataFrame(Course.course_array, columns=["id", "n_lessons", "n_students", "teacher"], index=None)
+        teacher_course_array = np.array(teacher_course_list)
+        Course.course_array = np.column_stack([Course.course_array, teacher_course_array,  np.array(course_year_list)])
+
+        Course.courses = pd.DataFrame(Course.course_array, columns=["id", "n_lessons", "n_students", "teacher", "year"], index=None)
         Course.display()
 
     @staticmethod
     def display():
-        print(f"n_courses: {len(Course.courses)}")
-        print(f"teacher course counts: {Course.courses['teacher'].value_counts()}")
+        #print(f"n_courses: {len(Course.courses)}")
+        #print(f"course_per_year: {Course.courses['year'].value_counts()}")
+        #print(f"teacher course counts: {Course.courses['teacher'].value_counts()}")
         print(Course.courses)
-        for course in Course.course_list:
-            print(f"Course {course.id}: Blocks {course.get_blocks}, Teacher: {course.teacher.id}")
+        #for course in Course.course_list:
+        #    print(f"Course {course.id}: Blocks {course.get_blocks}, Teacher: {course.teacher.id}, Year: {course.year}")
 
 class Teacher:
     ids: list
@@ -205,7 +216,7 @@ class Room:
         Room.room_array = np.column_stack([Room.ids, Room.capacities])
 
         Room.rooms = pd.DataFrame(Room.room_array, columns=["id", "capacity"], index=None)
-        Room.display()
+        #Room.display()
 
     def display():
         print(Room.rooms)
@@ -294,7 +305,7 @@ def build_timetable(courses, rooms, horizon, solver, start_vars, is_in_room_vars
                 if solver.Value(is_in_room_vars[(c.id, i, r.id)]) == 1:
                     # Fill [start_val..start_val+blk_size-1]
                     for t in range(start_val, start_val + blk_size):
-                        timetable.at[t, r.id] = f"C{c.id}({c.n_students}:{c.teacher.id})"
+                        timetable.at[t, r.id] = f"C{c.id}({c.year}:{c.n_students}:{c.teacher.id})"
 
     # Now split timetable into n_days parts
     import datetime
@@ -599,8 +610,10 @@ def main_multi_day():
     R = Room
     P = Teacher
 
-    c_per_subset = len(C.course_list) // year
-    C_subsets = [C.course_list[i:i + c_per_subset] for i in range(0, len(C.course_list), c_per_subset)]
+    
+    C_subsets = Course.years_subsets
+    print(f"course_ids: {[c.id for subset in C_subsets for c in subset]}")
+    print(f"C_subsets: {[c.year for subset in C_subsets for c in subset]}")
 
     model = cp_model.CpModel()
 
