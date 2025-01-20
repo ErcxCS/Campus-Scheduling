@@ -148,10 +148,6 @@ class TimeSlot:
         #TimeSlot.display()
 
     def generate_week(n_days: int, n_slots_per_day: int, off_slot_lists_per_day):
-        """
-        off_slot_lists_per_day: e.g. a list of length n_days,
-        where each entry is a list of slot indices that are off for that day.
-        """
         total_slots = n_days * n_slots_per_day
         TimeSlot.ids = np.arange(total_slots)
         TimeSlot.offs = np.zeros(total_slots, dtype=bool)
@@ -174,9 +170,6 @@ class TimeSlot:
 
     @staticmethod
     def get_available_blocks(block_size: int):
-        """
-        Get all possible consecutive blocks of `block_size` in the schedule.
-        """
         blocks = []
         for start_idx in range(len(TimeSlot.slot_list) - block_size + 1):
             block = TimeSlot.slot_list[start_idx:start_idx + block_size]
@@ -310,19 +303,11 @@ class Room:
         print(Room.rooms)
     
 def display_results(R, T, x, solver, capacity=None, n_students=None):
-    """
-    R: The Room object (containing R.ids, etc.)
-    T: The TimeSlot object (containing T.ids, etc.)
-    x: Dict of variables keyed by (course, slot, room).
-    solver: The cp_model.CpSolver() or similar.
-    capacity: Optional function or dict to get a room's capacity. e.g. capacity(room_id).
-    n_students: Optional function or dict to get a course's enrollment. e.g. n_students(course_id).
-    """
 
-    # 1) Print out each assigned (course, slot, room)
+
     for (course, slot, room), var in x.items():
-        if var.solution_value() == 1:  # CP-SAT: solver.Value(...)
-            # If you have capacity and n_students, you can print extra info:
+        if var.solution_value() == 1: 
+
             if capacity and n_students:
                 cap = capacity(room)
                 enroll = n_students(course)
@@ -332,17 +317,14 @@ def display_results(R, T, x, solver, capacity=None, n_students=None):
             else:
                 print(f"Assigned: Course {course}, Slot {slot}, Room {room}")
 
-    # 2) Create a timetable DataFrame with rows=slots and columns=rooms
-    rooms = R.ids      # e.g. np.array([0,1,2]) or [1,2,3]
-    slots = T.ids      # e.g. np.array([0,1,2,3,4,5,...])
+    
+    rooms = R.ids    
+    slots = T.ids     
     
     timetable = pd.DataFrame(0, index=slots, columns=rooms)
 
-    # 3) Fill the DataFrame: Put the course ID (or course+1 if 0-based) in each used (slot, room)
     for (course, slot, room), var in x.items():
         if var.solution_value() == 1:
-            # If your course IDs start at 0, 
-            # you might prefer to write "course + 1" in the table to make it 1-based:
             timetable.at[slot, room] = course+1
     
     import datetime
@@ -381,19 +363,19 @@ def display_interval_results(courses, rooms, solver,
 from collections import defaultdict
 
 def build_timetable(courses, rooms, horizon, solver, start_vars, is_in_room_vars, n_days):
-    # Create an empty DataFrame with rows=0..(horizon-1), columns=room IDs
+
     room_ids = [r.id for r in rooms]
     timetable = pd.DataFrame("", index=range(horizon), columns=room_ids)
     unique_rooms = defaultdict(list)
-    # Fill the big timetable
+
     for c in courses:
         for i, blk_size in enumerate(c.get_blocks):
             start_val = solver.Value(start_vars[(c.id, i)])
-            # Which room?
+
             for r in rooms:
                 if solver.Value(is_in_room_vars[(c.id, i, r.id)]) == 1:
                     unique_rooms[r.id].append(blk_size)
-                    # Fill [start_val..start_val+blk_size-1]
+ 
                     for t in range(start_val, start_val + blk_size):
                         timetable.at[t, r.id] = f"C{c.id}({c.year}:{c.n_students}:{c.teacher.id})"
 
@@ -410,8 +392,6 @@ def build_timetable(courses, rooms, horizon, solver, start_vars, is_in_room_vars
     print(f"sum total block usage: {(sum(total_block_usage))}")
 
 
-
-    # Now split timetable into n_days parts
     import datetime
     time_indexes = [datetime.time(h+8, 30).strftime("%H:%M") for h in list(range(9))]
     day_length = horizon // n_days  # e.g., if horizon=63 for 7 days, day_length=9
@@ -465,227 +445,6 @@ def get_off_chunks(slot_list):
     return off_chunks
 
 
-def main2():
-    Course.generate_courses(4, (3, 8), (15, 32))
-    TimeSlot.generate_day(9, 4)
-    Room.generate_rooms(((1, 28), (2, 32)))
-
-    # Create a CP-SAT model
-    model = cp_model.CpModel()
-
-    # Sets
-    T = TimeSlot  # T slots in the day, e.g. 9 "on" slots
-    R = Room      # R rooms
-    C = Course    # C courses
-
-
-    # 1) Prepare data structures
-    all_intervals_per_room = {r.id: [] for r in R.room_list}
-    start_vars = {}
-    is_in_rooms = {}
-
-    # 2) Create intervals for each course-block
-    for c in C.course_list:
-        blocks = c.get_blocks
-        for i, block_size in enumerate(blocks):
-            start_var = model.NewIntVar(0, len(T.slot_list) - block_size,
-                                        f"start_c{c.id}_b{i}")
-            end_var   = model.NewIntVar(0, len(T.slot_list), 
-                                        f"end_c{c.id}_b{i}")
-            
-            # Link end = start + block_size
-            model.Add(end_var == start_var + block_size)
-            
-            # "Base" interval (not optional). We'll pair it with optional intervals:
-            interval_var = model.NewIntervalVar(
-                start_var, block_size, end_var,
-                f"interval_c{c.id}_b{i}"
-            )
-            
-            in_room_bools = []
-            
-            for room_obj in R.room_list:
-                in_r = model.NewBoolVar(f"inRoom_c{c.id}_b{i}_r{room_obj.id}")
-                in_room_bools.append(in_r)
-                is_in_rooms[(c.id, i, room_obj.id)] = in_r
-                
-                # Optional interval
-                opt_interval_var = model.NewOptionalIntervalVar(
-                    start_var, block_size, end_var,
-                    in_r,  # active if in_r == 1
-                    f"optinterval_c{c.id}_b{i}_r{room_obj.id}"
-                )
-                
-                # Add to that room's intervals
-                all_intervals_per_room[room_obj.id].append(opt_interval_var)
-            
-            # Force exactly 1 chosen room
-            model.Add(sum(in_room_bools) == 1)
-            
-            # Store the start var if you'll need it for building a timetable
-            start_vars[(c.id, i)] = start_var
-
-    # 3) Build and add "off" intervals (for each "off chunk") **once** per room
-    off_chunks = get_off_chunks(T.slot_list)
-    for room_obj in R.room_list:
-        r_id = room_obj.id
-        for (start_off, end_off) in off_chunks:
-            off_interval = model.NewIntervalVar(
-                start_off,
-                end_off - start_off,
-                end_off,
-                f"unavail_r{r_id}_{start_off}_{end_off}"
-            )
-            all_intervals_per_room[r_id].append(off_interval)
-
-    # 4) No Overlap in each room
-    for r_id, intervals in all_intervals_per_room.items():
-        model.AddNoOverlap(intervals)
-
-
-
-    # Solve
-    solver = cp_model.CpSolver()
-    status = solver.Solve(model)
-
-    if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
-        print("Solution found (status={}):".format(status))
-        # Build a timetable DataFrame
-        timetable_df = build_timetable(
-            courses=C.course_list,
-            rooms=R.room_list,
-            horizon=len(T.slot_list),  # e.g. 9
-            solver=solver,
-            start_vars=start_vars,
-            is_in_room_vars=is_in_rooms,
-            block_size_func=None  # We just do course.blocks[i]
-        )
-        print(timetable_df)
-    else:
-        print("No solution found (status={}).".format(status))
-
-    
-def main():
-    Course.generate_courses(5, (3, 5), (15, 32))
-    TimeSlot.generate_day(9, 4)
-    Room.generate_rooms(((1, 28), (2, 32)))
-
-    # Create a CP-SAT model
-    #model = pywraplp.Solver.CreateSolver("SCIP")
-    model = pywraplp.Solver.CreateSolver("SCIP")
-
-    # Sets
-    C = Course
-    T = TimeSlot
-    R = Room
-
-    # Parameters
-    n_slots = lambda course_id: int(C.courses[C.courses["id"] == course_id]["n_lessons"].values) # number of time slots t required by lesson of course c
-    #n_slots = lambda course_id: max(C.course_list[course_id].blocks)
-    n_students = lambda course_id: int(C.courses[C.courses["id"] == course_id]["n_students"].values) # number of students enrolled in course c
-    capacity = lambda room_id: int(R.rooms[R.rooms["id"] == room_id]["capacity"].values) # capacity of room r
-
-   
-    # Decision variable
-    x = {}
-    for course in C.course_list:
-        for slot in T.slot_list:
-            for room in R.room_list:
-                #x[(course.id, slot.id, room.id)] = model.NewBoolVar(f"x_c{course.id}_t{slot.id}_r{room.id}")
-                x[(course.id, slot.id, room.id)] = model.BoolVar(f"x_c{course.id}_t{slot.id}_r{room.id}")
-
-    y = {}
-    
-    for slot in T.get_available_blocks(3):
-        print(len(slot))
-
-    # Constraints
-
-    for course in C.course_list:
-        for room in R.room_list:
-            for slot in T.slot_list:
-                if slot.is_off:
-                    model.Add(x[(course.id, slot.id, room.id)] == 0)
-                else:
-                    model.Add(x[(course.id, slot.id, room.id)] <= 1)
-
-    for course in C.course_list:
-        constraint_slot = []
-        block_size = max(course.blocks)
-        #block_size = n_slots(course.id)
-
-        for t, slot in enumerate(T.slot_list):
-            """ if t + block_size > len(T.slot_list) - 1:
-                print(t + block_size)
-                print(len(T.slot_list) - 1)
-                continue
-
-            block = T.slot_list[t : t + block_size]
-            if any(slot.is_off for slot in block):
-                continue
-             """
-            if not slot.is_off:
-                constraint_room = []
-                for room in R.room_list:
-                    constraint_room.append(x[(course.id, slot.id, room.id)])
-                    constraint_slot.append(x[(course.id, slot.id, room.id)])
-                model.Add(sum(constraint_room) <=1)
-        model.Add(sum(constraint_slot) == block_size)
-
-    for course in C.course_list:
-        constraint_cons = []
-        block_size = max(course.blocks)
-
-        for room in R.room_list:
-            constaint_per_room = []
-            for slot in T.slot_list:
-                if not slot.is_off:
-                    constaint_per_room.append(x[(course.id, slot.id, room.id)])
-                    constraint_cons.append(x[(course.id, slot.id, room.id)])
-            model.Add(sum(constaint_per_room) <= block_size)
-        model.Add(sum(constraint_cons) == block_size)
-
-    for room in R.room_list:
-        for slot in T.slot_list:
-            if not slot.is_off:
-                constraint_overlap = []
-                for course in C.course_list:
-                    constraint_overlap.append(x[(course.id, slot.id, room.id)])
-                model.Add(sum(constraint_overlap) <= 1)
-
-
-    #solver = cp_model.CpSolver()
-    #status = solver.Solve(model)
-    status = model.Solve()
-
-    if status == model.OPTIMAL:
-        print("Optimal solution found")
-        display_results(R, T, x, model)
-
-    elif status == model.FEASIBLE:
-        print("Feasible solution found!")
-        display_results(R, T, x, model)
-    else:
-        print("No solution found.")
-
-def main3():
-    Course.generate_courses(6, (3, 5), (15, 32))
-    TimeSlot.generate_day(9, 4)
-    Room.generate_rooms(((1, 28), (2, 32)))
-
-    # Create a CP-SAT model
-    #model = pywraplp.Solver.CreateSolver("SCIP")
-    model = pywraplp.Solver.CreateSolver("SCIP")
-
-    # Sets
-    C = Course
-    T = TimeSlot
-    R = Room
-
-    for c in C.course_list:
-        for block in c.get_blocks:
-            print(block)
-
 def find_subset_of_course(c: Course, subsets: list[list[Course]]):
     for i, subset in enumerate(subsets):
         if c in subset:
@@ -698,9 +457,6 @@ def main_multi_day():
     year = 4
     n_teachers = 9
 
-
-    # Suppose off_by_day is a list of length 7,
-    # each element is a list of "off slot indices" for that day
     off_by_day = [[4] for _ in range(num_days)]
     off_by_day[-1] = off_by_day[-1] + [5]
 
@@ -719,11 +475,8 @@ def main_multi_day():
     print(f"C_subsets: {[c.year for subset in C_subsets for c in subset]}")
 
     model = cp_model.CpModel()
-
-    # Flatten horizon = num_days * slots_per_day
     horizon = num_days * slots_per_day
 
-    # same approach:
     all_intervals_per_room = {r.id: [] for r in Room.room_list}
     start_vars = {}
     is_in_rooms = {}
@@ -769,7 +522,6 @@ def main_multi_day():
 
 
     #model.Minimize(sum(seat_utilization_terms)) # Objective function
-    # Build off_chunks with day-based logic => just returns a list of (start_off, end_off) in [0..horizon)
     off_chunks = get_off_chunks(TimeSlot.slot_list)
 
     day_vars = {}
@@ -814,6 +566,7 @@ def main_multi_day():
             central_x[(s, d)] = model.NewIntVar(0, 100, f"central_x_subset{s}_day{d}")
             central_y[(s, d)] = model.NewIntVar(0, 100, f"central_y_subset{s}_day{d}")
     
+    # Come back hea
     abs_diff_x = {}
     abs_diff_y = {}
     for s, subset in enumerate(C_subsets):
@@ -903,11 +656,11 @@ def main_multi_day():
     print(f"111 Number lessons: {C.courses['n_lessons'].sum()}")
     if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
         print("Solution found (status={}):".format(status))
-        # Build a timetable DataFrame
+
         timetable_df = build_timetable(
             courses=C.course_list,
             rooms=R.room_list,
-            horizon=len(T.slot_list),  # e.g. 9
+            horizon=len(T.slot_list),
             solver=solver,
             start_vars=start_vars,
             is_in_room_vars=is_in_rooms,
@@ -924,7 +677,4 @@ if __name__ == "__main__":
     np.random.seed(seed)
     random.seed(seed)   
 
-    #main()
-    #main2()
-    #main3()
     main_multi_day()
