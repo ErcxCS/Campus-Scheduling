@@ -95,7 +95,7 @@ class Course:
         Course.course_array = np.column_stack([Course.course_array, teacher_course_array,  np.array(course_year_list)])
 
         Course.courses = pd.DataFrame(Course.course_array, columns=["id", "n_lessons", "n_students", "teacher", "year"], index=None)
-        #Course.display()
+        Course.display()
 
     @staticmethod
     def display():
@@ -169,7 +169,7 @@ class TimeSlot:
             for idx, off in zip(TimeSlot.ids, TimeSlot.offs)
         ]
         TimeSlot.day = pd.DataFrame(TimeSlot.slot_array, columns=["id", "is_off"])
-        #TimeSlot.display()
+        TimeSlot.display()
 
 
     @staticmethod
@@ -866,7 +866,7 @@ def main_multi_day():
     objective_expression = room_usage_weight * sum(room_usage_terms)
     objective_expression += seat_utilization_weight * sum(seat_utilization_terms)
     objective_expression += distance_weight * sum(distance_terms)
-    objective_expression += idle_time_weight * sum(span_terms)
+    #objective_expression += idle_time_weight * sum(span_terms)
     model.Minimize(objective_expression) #Objective function
     #objective_expression = sum(room_usage_terms)
     #model.Minimize(sum(seat_utilization_terms)) #Objective function
