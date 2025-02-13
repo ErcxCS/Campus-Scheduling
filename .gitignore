@@ -13,6 +13,10 @@
 # Include requirements file
 !requirements.txt
 
+# xlsx files
+!*.xlsx
+!*.xls
+
 # Optional: Ignore common Python cache files
 __pycache__/
 *.pyc
