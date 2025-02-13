@@ -1,0 +1,20 @@
+# Ignore everything
+**
+
+# Allow .py files
+!*.py
+
+# Allow directories to check for .py files
+!*/
+
+# Include the .gitignore file itself
+!.gitignore
+
+# Include requirements file
+!requirements.txt
+
+# Optional: Ignore common Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
