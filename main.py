@@ -493,6 +493,7 @@ def main_multi_day():
 
 
             """
+            *   1. Course Block and Interval Definition
             Block Duration Constraint
             For eachg course block, this constraint ensures that the end time is exactly the
             start time plus the block'S fixed duration. In other word, every scheduled block of
@@ -501,6 +502,7 @@ def main_multi_day():
             model.Add(end_var == start_var + block_size)
             
             """
+            *   1. Course Block and Interval Definition
             Interval Variable Creation
             An interval variable is created for eachg course block. This varialbe represents the time
             span during which the course block takes place.
@@ -517,6 +519,7 @@ def main_multi_day():
                 in_r = model.NewBoolVar(f"inRoom_c{c.id}_b{i}_r{r.id}")
 
                 """
+                *   2. Room Assignment Constraints
                 Capacity Check for Room Assignment Constraint
                 For each room option, if a course block is assigned to that room (i.e. the boolean variable
                 in_r is true), then the room's capacity must be at least as large as the number of students
@@ -527,6 +530,7 @@ def main_multi_day():
                 is_in_rooms[(c.id, i, r.id)] = in_r
 
                 """
+                *   2. Room Assignment Constraints
                 Optional Interval per Room
                 For each room, an optional interval is created that is "active" only when the course block is actually
                 assigned to that room. These optional intervals will later be used to enforce that no two events in the
@@ -537,7 +541,8 @@ def main_multi_day():
                 all_intervals_per_room[r.id].append(opt_interval)
 
                 """
-                Objective function to minimize wasted space
+                *   2. Room Assignment Constraints
+                Objective Tern for Seat Utilization
                 If a course block iis assigned to a room, this term adds the difference between the room's capacity and
                 the number of students to the objective. Minimizing this term encourages assignments where the room's
                 capacity closely fits the class size (i.e. reduces wasted space)
@@ -548,6 +553,7 @@ def main_multi_day():
                 #seat_utilization_terms.append(is_in_rooms[(c.id, i, r.id)] * wasted_ration)
 
             """
+            *   2. Room Assignment Constraints
             Exactly-One Room Assignment Constraint
             For every course block, exactly one of the room assignment booleans must be true.
             This ensures that each block is scheduled in one-and only one- room
@@ -568,6 +574,7 @@ def main_multi_day():
             day_vars[(c.id, i)] = day_c_i
 
             """
+            *   3. Day and Time Slot Constraints
             Day Calculation from Start Time constraint
             The day on which a courseblock is scheduled is calculated by dividing its start time by the
             number of slots per day. This tells you on which dayt (0 to num_days - 1) the block begins
@@ -575,6 +582,7 @@ def main_multi_day():
             model.AddDivisionEquality(day_c_i, start_vars[(c.id, i)], slots_per_day)
 
             """
+            *   3. Day and Time Slot Constraints
             Enforcing a Block Withing a Day constraint
             This constraint makes sure that a course block does not "spill over" into the next day by
             ensuring that the block finisihes before the day's end
@@ -593,6 +601,7 @@ def main_multi_day():
                 blocks_in_day_lits.append(day_c_i_d)
 
             """
+            *   3. Day and Time Slot Constraints
             At most One Block per Day per Course
             For every course, this constraint ensures that at most one block is scheduled on any given day
             (The booleans day_c_i_d are used to indicate whether a block is on day d)
@@ -609,6 +618,7 @@ def main_multi_day():
                 if key in is_in_rooms:
                     assignments_in_room.append(is_in_rooms[key])
         """
+        *   4. Room Usage and Overall Utilization
         Room Usage Indicator
         For each room, a boolean variable room_used is set to 1 if any course block is assigned there.
         This is later used in the objective funcion to help minimize the number of rooms used.
@@ -616,6 +626,7 @@ def main_multi_day():
         model.AddMaxEquality(room_used[r.id], assignments_in_room)
     
     """
+    *   4. Room Usage and Overall Utilization
     Objective Term for Room Usage
     The sum of these terms (multiplied by a weight) is included in the objective to favor solutions that use fewer rooms
     """
@@ -626,6 +637,7 @@ def main_multi_day():
     for s, subset in enumerate(C_subsets):
         for d in range(num_days):
             """
+            *   5. Location Centrality and Distance Terms
             Central Coordiantes for Course Subsets
             For each course subset (for example, courses from the same year) and foır each day,
             these variables represents a "central" room location where you'd like the courses to cluster
@@ -645,6 +657,7 @@ def main_multi_day():
                 for b, _ in enumerate(c.blocks):
                     for r in R.room_list:
                         """
+                        *   5. Location Centrality and Distance Terms
                         Absolute Difference Between Room Location and Central Point
                         For every course in the subset, these constraints compute the absolute difference between
                         the room where the course block is scheduled and the central ocation for that subset on that day.
@@ -675,6 +688,7 @@ def main_multi_day():
             for c in subset:
                 for b, block_size in enumerate(c.blocks):
                     """
+                    *   6. Idle Time Minimization
                     Earliest and Latest Block Times per Subset per Day
                     For each subset of courses on each day, these constraints record the earliest starting time
                     and the latest finishing time among all blocks
@@ -688,6 +702,8 @@ def main_multi_day():
             span[(s, d)] = model.NewIntVar(0, horizon, f"span_sub{s}_day{d}")
 
             """
+            *   6. Idle Time Minimization
+            Span Calculation (Idle Time Indicator)
             The "span" (the total time window during which the subset's classes occur) is computed.
             Minimizing this span would encourage classes for the same subset to be scheduled closer together,
             therby reducing idle gaps 
@@ -701,6 +717,7 @@ def main_multi_day():
     distance_weight = 5.0
 
     """
+    *   9. Objective Function
     Combined Objective
     Room Usage Term: Penalizes using many rooms by adding a cost for each room that is used
     Seat Utilization Term: Penalizes wasted capacity, encouraging courses to be assigned to rooms
@@ -719,6 +736,7 @@ def main_multi_day():
     for r in Room.room_list:
         for (start_off, end_off) in off_chunks:
             """
+            *   7. Unavailable Time ("Off") Periods for Rooms
             Adding Off-Chunksas Intervals 
             For each room, certain time chunks are defined as "off" or unavailable. These intervals
             are added to the room's list of intervals so thast no course block can be scheduled during these times
@@ -729,6 +747,7 @@ def main_multi_day():
 
     for r_id, intervals in all_intervals_per_room.items():
         """
+        *   8. No-Overlap Constraints
         Room No-Overlap
         For each room, all interavals ( both course blocks anmd the off periods) must not overlap.
         This ensures that no two events are scheduled in the same room at the same time. 
@@ -737,6 +756,7 @@ def main_multi_day():
 
     for i in range(len(C_subsets)):
         """
+        *   8. No-Overlap Constraints
         Subset No-Overlap
         For each subset of courases (e.g.by year), this constraint prevents overlapping
         intervals among the courses in that subset. This might be used to avoid conflicts
@@ -747,6 +767,7 @@ def main_multi_day():
 
     for p in P.ids:
         """
+        *   8. No-Overlap Constraints
         Teacher No-Overlap
         For each teacher, the model enforces that the teacher's assigned course intervals do not overlap,
         ensuring that a teacher isn't scheduled to be in two places at once.
