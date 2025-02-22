@@ -22,3 +22,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# Do not ignore the data folder and its contents
+!data/
+!data/**
