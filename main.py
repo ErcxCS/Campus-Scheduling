@@ -812,9 +812,18 @@ def main_multi_day():
     else:
         print("No solution found (status={}).".format(status))
 
+
+def preprocessing():
+    course_info = pd.read_excel("./data/fall2425_course_info.xlsx")
+    print(course_info[course_info["CourseCode"] == "CSE 491"]["OgrenciSayisi"].sum())
+
+def exam_scheduling_main():
+    preprocessing()
+
 if __name__ == "__main__":
     seed = None
     np.random.seed(seed)
     random.seed(seed)   
 
-    main_multi_day()
+    #main_multi_day()
+    exam_scheduling_main()
