@@ -78,7 +78,7 @@ class Course:
     @staticmethod
     def read_courses(path: str):
         course_df = pd.read_excel(path, index_col=None, header=0)
-        print(course_df.head())
+        #print(course_df.head())
         for i, row in enumerate(course_df.values):
             department_name, \
             course_name, \
@@ -112,6 +112,7 @@ class Course:
         for course in Course.course_list:
             if course.course_code == course_code:
                 return course
+        raise Exception(f"No course with {course_code} found.")
 
     @staticmethod
     def display():
@@ -295,17 +296,22 @@ class Room:
     def __init__(
             self,
             id: int,
+            room_code: str,
             capacity: int,
-            location: np.ndarray,
-            faculty_id: int
+            c_type: str,
             # type_idx
     ):
         self.id = int(id)
         self.capacity = int(capacity)
-        self.location = location
-        self.faculty_id = faculty_id
-        self.x = int(location[0])
-        self.y = int(location[1])
+        self.room_code = room_code
+        self.c_type = c_type
+        print(f"c_type: {self.c_type}")
+        self.is_lab = c_type == "Lab"
+        if self.is_lab:
+            short = "L"
+        else:
+            short = "D"
+        self.shorthand = short
 
     def generate_rooms(capacities: tuple[tuple[int, int]], faculty: int):
         m = 100
@@ -344,6 +350,36 @@ class Room:
             "faculty_id": faculty_ids
         })
         #Room.display()
+
+    @staticmethod
+    def read_classroom_data(path: str):
+        classroom_df = pd.read_excel(path)
+        classroom_df = classroom_df[classroom_df["Room"].notna()][["Room", "Capacity", "Type"]]
+
+        room_caps = []
+        room_codes = []
+        room_ids = []
+        labs = []
+        for i, row in enumerate(classroom_df.values):
+            room_code, capacity, c_type = row
+            room_ids.append(i)
+            room_caps.append(capacity)
+            room_codes.append(room_code)
+
+            room = Room(i, room_code, capacity, c_type)
+            if room.is_lab:
+                labs.append(room)
+            else:
+                Room.room_list.append(room)
+        Room.room_list += labs
+
+        Room.room_array = np.column_stack([room_ids, room_codes, room_caps])
+        Room.rooms = pd.DataFrame({
+            "id": room_ids,
+            "room_codes": room_codes,
+            "capacities": room_caps
+        })
+
 
     def display():
         print(Room.rooms)
@@ -469,9 +505,6 @@ def build_timetable2(rooms, horizon, n_days):
     ]
     day_length = horizon // n_days  # e.g., if horizon=63 for 7 days, day_length=9
 
-    # If you have a fixed set of names:
-    # day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", ...]
-    # OR auto-generate:
     day_names = ["Pazartesi", "Sali", "Carsamba", "Persembe", "Cuma"]
     if n_days == 6:
         day_names = day_names + ["Cumartesi"]
@@ -484,7 +517,7 @@ def build_timetable2(rooms, horizon, n_days):
 
         day_df.index = time_indexes
         day_df.columns = [
-            f"Rm{rooms[i].id}({rooms[i].capacity}[F{rooms[i].faculty_id}])"
+            f"{rooms[i].room_code}({rooms[i].capacity})"
             for i in range(len(rooms))
         ]
 
@@ -900,15 +933,16 @@ def exam_scheduling_main():
 
     # Read course data
     course_xlsx = "./data/fall2425_course_info - Copy.xlsx"
+    room_xlsx = "./data/New Microsoft Excel Worksheet.xlsx"
     Course.read_courses(course_xlsx)
-    #Course.display()
-    Room.generate_rooms(((1, 40), (8, 72), (3, 80), (1, 88), (1, 120), (2, 32), (2, 96), (6, 64)), year)
+    Course.display()
+    #Room.generate_rooms(((1, 40), (8, 72), (3, 80), (1, 88), (1, 120), (2, 32), (2, 96), (6, 64)), year)
+    Room.read_classroom_data(room_xlsx)
     off_by_day = [[4] for _ in range(num_days)]
     off_by_day[-1] = off_by_day[-1] + [5]
     TimeSlot.generate_week(num_days, slots_per_day, off_by_day)
 
     timetable_df = build_timetable2(Room.room_list, len(TimeSlot.slot_list), num_days)
-
     for day_name, df in timetable_df:
         print(day_name)
         print(df)
