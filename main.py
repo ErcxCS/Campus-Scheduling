@@ -814,8 +814,50 @@ def main_multi_day():
 
 
 def preprocessing():
+    # Read the data
     course_info = pd.read_excel("./data/fall2425_course_info.xlsx")
-    print(course_info[course_info["CourseCode"] == "CSE 491"]["OgrenciSayisi"].sum())
+
+    #TODO Figure out a way to distinguish courses that does not require exams and labs
+    #!WARNING: This current preprocessing removes all courses with 0 or 1 credit and 0 theory hours
+    #! Due to no clear distinction between placeholder courses and courses which requires lab
+    #! (Senior Design Project and Computer Programming I Laboratory)
+    #! Also 'Seminer' from Çevre and 'Mezuniyet Projesi-I' from Elektrik has credits 2 but 0 theory hours
+    #! yet they are clearly do not require in class examination.
+    #! Currently only scheduling courses to regular classrooms
+    #! Additionally, courses which usually do not use any laboratory may require laboratories
+    #! for examination (Natural Sciences). This is treated as a special case, and we will not address it
+    #! in this version.
+    #TODO add teacher preference (examination in lab option)
+    
+    # Filter out rows where 'DONEM_TIP' is not 'Güz'
+    course_info = course_info[course_info["DONEM_TIP"] == "Güz"]
+    
+    # Drop the 'DONEM_TIP' column
+    course_info = course_info.drop("DONEM_TIP", axis=1)
+
+    # Filter out rows where 'KREDI' is in [0, 1]
+    course_info = course_info[~course_info["KREDI"].isin([0, 1])]
+
+    # Drop the 'KREDI' colunn
+    course_info = course_info.drop("KREDI", axis=1)
+
+    # Filter out rows where 'TEO_SAAT' < 1
+    course_info = course_info[~course_info["TEO_SAAT"].isin([0])]
+
+    course_info = course_info.drop(["TEO_SAAT", "LAB_SAAT", "UYG_SAAT"], axis=1)
+
+    # Filter out courses with 0 student
+    course_info = course_info[~course_info["OgrenciSayisi"].isin([0])]
+
+    #! missing data: no TDB101 for CSE
+    course_codes = course_info["CourseCode"].value_counts()
+    
+    for course_code_key, course_code_value in course_codes.items():
+        if course_code_value > 2:
+            print(course_info[course_info["CourseCode"] == course_code_key])
+    
+    # Save the result to a new Excel file
+    course_info.to_excel("./data/fall2425_course_info_04.xlsx", index=False)
 
 def exam_scheduling_main():
     preprocessing()
