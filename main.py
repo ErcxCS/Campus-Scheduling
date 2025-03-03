@@ -52,7 +52,7 @@ class Course:
     ):
         self.id = int(id)
         self.n_students = int(n_students)
-        self.department = department
+        self.departments = [department]
         self.course_code = course_code
         self.shared = shared
         self.requires_lab = requires_lab
@@ -60,9 +60,8 @@ class Course:
         self.course_name = course_name
 
         self.blocks = []
-        self.blocks = self.get_blocks
+        self.blocks = self.get_blocks()
 
-    @property
     def get_blocks(self):
         """
         Blocks of two for courses
@@ -80,37 +79,80 @@ class Course:
     def read_courses(path: str):
         course_df = pd.read_excel(path, index_col=None, header=0)
         print(course_df.head())
-        for i, course in enumerate(course_df.values):
+        for i, row in enumerate(course_df.values):
             department_name, \
             course_name, \
             year, \
             n_students, \
             course_code, \
             shared, \
-            requires_lab = course
+            requires_lab = row
             
             dep = Department.get_department(department_name)
             if shared:
                 if course_code in Course.course_codes:
-                    pass
-            new_course = Course(i, dep, course_name, year, n_students, course_code, shared, requires_lab)
+                    course = Course.get_course(course_code)
+                    course.add_department(dep, n_students)
+                    dep.add_course(course)
+                    continue
+
+            new_course = Course(i, dep, course_name, year, n_students, course_code, shared == 1, requires_lab == 1)
             dep.add_course(new_course)
+            Course.course_codes.add(course_code)
             Course.course_list.append(new_course)
+
+        #Course.display()
+
+    def add_department(self, dep: Department, n_students: int):
+        self.departments.append(dep)
+        self.n_students += n_students
 
     @staticmethod
     def get_course(course_code: str):
-        pass
+        for course in Course.course_list:
+            if course.course_code == course_code:
+                return course
 
     @staticmethod
     def display():
-        #print(f"n_courses: {len(Course.courses)}")
-        #print(f"course_per_year: {Course.courses['year'].value_counts()}")
-        #print(f"teacher course counts: {Course.courses['teacher'].value_counts()}")
-        print(Course.courses)
-        #for course in Course.course_list:
-        #    print(f"Course {course.id}: Blocks {course.get_blocks}, Teacher: {course.teacher.id}, Year: {course.year}")
+        n = len(Course.course_list)
+        dep_names = []
+        course_names = []
+        years = []
+        n_students_list = []
+        course_codes = []
+        shares = []
+        requires_labs = []
 
-class Teacher:
+        for course in Course.course_list:
+            department_name = ", ".join(dep.department_name for dep in course.departments)
+            dep_names.append(department_name)
+
+            course_names.append(course.course_name)
+            years.append(course.year)
+            n_students_list.append(course.n_students)
+            course_codes.append(course.course_code)
+            shares.append(course.shared)
+            requires_labs.append(course.requires_lab)
+
+
+        Course.courses = pd.DataFrame({
+            "Department Names": dep_names,
+            "Course Names": course_names,
+            "Year": years,
+            "Student Count": n_students_list,
+            "Course Code": course_codes,
+            "Shared": shares,
+            "Lab": requires_labs,
+        })
+
+        print(f"department amount: {len(Department.departments)}")
+        print(f"exam amount: {len(Course.course_list)}")
+        print(f"n_students: {sum(n_students_list)}")
+        print(Course.courses.head())
+
+
+""" class Teacher:
     ids: list
     teachers: list = []
 
@@ -125,7 +167,7 @@ class Teacher:
     def generate_teachers(n_teachers: int):
         Teacher.ids = list(range(0, n_teachers))
         for id in Teacher.ids:
-            Teacher.teachers.append(Teacher(id))
+            Teacher.teachers.append(Teacher(id)) """
 
 class TimeSlot:
     slot_list: list = list()
@@ -169,7 +211,7 @@ class TimeSlot:
             for idx, off in zip(TimeSlot.ids, TimeSlot.offs)
         ]
         TimeSlot.day = pd.DataFrame(TimeSlot.slot_array, columns=["id", "is_off"])
-        TimeSlot.display()
+        #TimeSlot.display()
 
 
     @staticmethod
@@ -301,7 +343,7 @@ class Room:
             "location": [list(loc) for loc in rooms],
             "faculty_id": faculty_ids
         })
-        Room.display()
+        #Room.display()
 
     def display():
         print(Room.rooms)
@@ -415,6 +457,41 @@ def build_timetable(courses, rooms, horizon, solver, start_vars, is_in_room_vars
     # day_tables[d] is the timetable slice for day d
     return day_tables
 
+def build_timetable2(rooms, horizon, n_days):
+    import datetime
+    import pandas as pd
+    
+    room_ids = [r.id for r in rooms]
+    timetable = pd.DataFrame("", index=range(horizon), columns=room_ids)
+
+    time_indexes = [
+        datetime.time(h + 8, 30).strftime("%H:%M") for h in range(9)
+    ]
+    day_length = horizon // n_days  # e.g., if horizon=63 for 7 days, day_length=9
+
+    # If you have a fixed set of names:
+    # day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", ...]
+    # OR auto-generate:
+    day_names = ["Pazartesi", "Sali", "Carsamba", "Persembe", "Cuma"]
+    if n_days == 6:
+        day_names = day_names + ["Cumartesi"]
+
+    day_tables = []
+    for d in range(n_days):
+        start_row = d * day_length
+        end_row   = (d + 1) * day_length
+        day_df = timetable.iloc[start_row:end_row, :].copy()
+
+        day_df.index = time_indexes
+        day_df.columns = [
+            f"Rm{rooms[i].id}({rooms[i].capacity}[F{rooms[i].faculty_id}])"
+            for i in range(len(rooms))
+        ]
+
+        # Store as a tuple (day_name, dataframe)
+        day_tables.append((day_names[d], day_df))
+        
+    return day_tables
 
 def get_off_chunks(slot_list):
     """
@@ -816,15 +893,27 @@ def main_multi_day():
     else:
         print("No solution found (status={}).".format(status))
 
+def exam_scheduling_main():
+    num_days = 6
+    slots_per_day = 9
+    year = 4
 
-def preprocessing():
     # Read course data
     course_xlsx = "./data/fall2425_course_info - Copy.xlsx"
     Course.read_courses(course_xlsx)
+    #Course.display()
+    Room.generate_rooms(((1, 40), (8, 72), (3, 80), (1, 88), (1, 120), (2, 32), (2, 96), (6, 64)), year)
+    off_by_day = [[4] for _ in range(num_days)]
+    off_by_day[-1] = off_by_day[-1] + [5]
+    TimeSlot.generate_week(num_days, slots_per_day, off_by_day)
 
+    timetable_df = build_timetable2(Room.room_list, len(TimeSlot.slot_list), num_days)
 
-def exam_scheduling_main():
-    preprocessing()
+    for day_name, df in timetable_df:
+        print(day_name)
+        print(df)
+        print()
+
 
 if __name__ == "__main__":
     seed = None
