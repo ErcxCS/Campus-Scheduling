@@ -5,97 +5,101 @@ from ortools.sat.python import cp_model
 from ortools.linear_solver import pywraplp
 from matplotlib import pyplot as plt
 
+class Department:
+    departments = []
+    department_names = []
+    department_ids = []
+
+    def __init__(self, department_name: str):
+        self.courses = []
+        self.curriculums = {i: [] for i in range(1, 5)}
+        
+        self.id = len(Department.departments)
+        Department.department_ids.append(self.id)
+
+        self.department_name = department_name
+        Department.department_names.append(department_name)
+        Department.departments.append(self)
+
+    def add_course(self, course):
+        if course not in self.courses:
+            self.courses.append(course)
+            self.curriculums.setdefault(course.year, []).append(course)
+
+    @classmethod
+    def get_department(cls, department_name: str):
+        if department_name in cls.department_names:
+            dep_idx = cls.department_names.index(department_name)
+            return cls.departments[dep_idx]
+        return cls(department_name)
+
+
 class Course:
-    course_list: list = list()
+    course_list = []
     courses: pd.DataFrame
-    ids: np.ndarray
-    n_lessons: np.ndarray
-    n_students: np.ndarray
-    course_array: np.ndarray
-    years_subsets: list[list] = list(list())
+    course_codes = set()
 
     def __init__(
         self,
         id: int,
-        n_lessons: int,
+        department: Department,
+        course_name: str,
+        year: int,
         n_students: int,
-        teacher = None,
-        year: int = None,
+        course_code: str,
+        shared: bool,
+        requires_lab: bool,
     ):
         self.id = int(id)
-        self.n_lessons = int(n_lessons)
         self.n_students = int(n_students)
-        self.teacher = teacher
-        self.teacher.add_course(self)
+        self.department = department
+        self.course_code = course_code
+        self.shared = shared
+        self.requires_lab = requires_lab
         self.year = year
+        self.course_name = course_name
 
         self.blocks = []
         self.blocks = self.get_blocks
 
-
     @property
     def get_blocks(self):
         """
-        Dynamically calculate the blocks of lectures based on n_lessons.
+        Blocks of two for courses
         """
         if len(self.blocks) == 0:
-            n = self.n_lessons
+            n = 2
             blocks = []
-            while n > 0:
-                if n == 4:
-                    if random.choice([True, True, False]):
-                        blocks.append(4)
-                        n -= 4
-                    else:
-                        blocks.append(min(2, n))
-                        n -= blocks[-1]
-                elif n % 3 == 0 or n == 5:
-                    blocks.append(3)
-                    n -= 3
-                elif n == 2:
-                    blocks.append(2)
-                    n -= 2
-                else:
-                    raise Exception("ERROR")
+            blocks.append(2)
+            n -= 2
                
-
-                
             self.blocks = blocks
         return self.blocks
-    
-    def iter_block_size(self):
-        blocks = self.get_blocks
-        for block in blocks:
-            yield block
 
     @staticmethod
-    def generate_courses(n_courses: int, lesson_count: tuple, student_count: tuple, teachers: list):
-        
-        Course.ids = np.arange(n_courses)
-        Course.n_lessons = np.random.randint(*lesson_count, (n_courses,))
-        Course.n_students = np.random.randint(*student_count, (n_courses,))
-        Course.course_array = np.column_stack([Course.ids, Course.n_lessons, Course.n_students])
-        teacher_course_list = []
-        course_year_list = []
-        n_years = 4
-
-        for i, course in enumerate(Course.course_array):
-            course_per_year = n_courses // n_years
-            year = i // course_per_year
-            id, n_lessons, n_students = course
-            new_course = Course(id, n_lessons, n_students, teacher=random.choice(teachers), year=year)
-            if len(Course.years_subsets) < year + 1:
-                Course.years_subsets.append([])
-            Course.years_subsets[year].append(new_course)
+    def read_courses(path: str):
+        course_df = pd.read_excel(path, index_col=None, header=0)
+        print(course_df.head())
+        for i, course in enumerate(course_df.values):
+            department_name, \
+            course_name, \
+            year, \
+            n_students, \
+            course_code, \
+            shared, \
+            requires_lab = course
+            
+            dep = Department.get_department(department_name)
+            if shared:
+                if course_code in Course.course_codes:
+                    pass
+            new_course = Course(i, dep, course_name, year, n_students, course_code, shared, requires_lab)
+            dep.add_course(new_course)
             Course.course_list.append(new_course)
-            course_year_list.append(new_course.year)
-            teacher_course_list.append(new_course.teacher.id)
 
-        teacher_course_array = np.array(teacher_course_list)
-        Course.course_array = np.column_stack([Course.course_array, teacher_course_array,  np.array(course_year_list)])
-
-        Course.courses = pd.DataFrame(Course.course_array, columns=["id", "n_lessons", "n_students", "teacher", "year"], index=None)
-        Course.display()
+    @staticmethod
+    def get_course(course_code: str):
+        pass
 
     @staticmethod
     def display():
@@ -814,50 +818,10 @@ def main_multi_day():
 
 
 def preprocessing():
-    # Read the data
-    course_info = pd.read_excel("./data/fall2425_course_info.xlsx")
+    # Read course data
+    course_xlsx = "./data/fall2425_course_info - Copy.xlsx"
+    Course.read_courses(course_xlsx)
 
-    #TODO Figure out a way to distinguish courses that does not require exams and labs
-    #!WARNING: This current preprocessing removes all courses with 0 or 1 credit and 0 theory hours
-    #! Due to no clear distinction between placeholder courses and courses which requires lab
-    #! (Senior Design Project and Computer Programming I Laboratory)
-    #! Also 'Seminer' from Çevre and 'Mezuniyet Projesi-I' from Elektrik has credits 2 but 0 theory hours
-    #! yet they are clearly do not require in class examination.
-    #! Currently only scheduling courses to regular classrooms
-    #! Additionally, courses which usually do not use any laboratory may require laboratories
-    #! for examination (Natural Sciences). This is treated as a special case, and we will not address it
-    #! in this version.
-    #TODO add teacher preference (examination in lab option)
-    
-    # Filter out rows where 'DONEM_TIP' is not 'Güz'
-    course_info = course_info[course_info["DONEM_TIP"] == "Güz"]
-    
-    # Drop the 'DONEM_TIP' column
-    course_info = course_info.drop("DONEM_TIP", axis=1)
-
-    # Filter out rows where 'KREDI' is in [0, 1]
-    course_info = course_info[~course_info["KREDI"].isin([0, 1])]
-
-    # Drop the 'KREDI' colunn
-    course_info = course_info.drop("KREDI", axis=1)
-
-    # Filter out rows where 'TEO_SAAT' < 1
-    course_info = course_info[~course_info["TEO_SAAT"].isin([0])]
-
-    course_info = course_info.drop(["TEO_SAAT", "LAB_SAAT", "UYG_SAAT"], axis=1)
-
-    # Filter out courses with 0 student
-    course_info = course_info[~course_info["OgrenciSayisi"].isin([0])]
-
-    #! missing data: no TDB101 for CSE
-    course_codes = course_info["CourseCode"].value_counts()
-    
-    for course_code_key, course_code_value in course_codes.items():
-        if course_code_value > 2:
-            print(course_info[course_info["CourseCode"] == course_code_key])
-    
-    # Save the result to a new Excel file
-    course_info.to_excel("./data/fall2425_course_info_04.xlsx", index=False)
 
 def exam_scheduling_main():
     preprocessing()
