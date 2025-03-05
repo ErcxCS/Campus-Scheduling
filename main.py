@@ -2,8 +2,6 @@ import numpy as np
 import pandas as pd
 import random
 from ortools.sat.python import cp_model
-from ortools.linear_solver import pywraplp
-from matplotlib import pyplot as plt
 
 class Department:
     departments = []
@@ -74,6 +72,9 @@ class Course:
                
             self.blocks = blocks
         return self.blocks
+    
+    def get_duration(self):
+        return self.get_blocks()[0]
 
     @staticmethod
     def read_courses(path: str):
@@ -153,23 +154,6 @@ class Course:
         print(Course.courses.head())
 
 
-""" class Teacher:
-    ids: list
-    teachers: list = []
-
-    def __init__(self, id: int):
-        self.id = id
-        self.courses : list[Course] = list()
-
-    def add_course(self, c: Course):
-        self.courses.append(c)
-
-    @staticmethod
-    def generate_teachers(n_teachers: int):
-        Teacher.ids = list(range(0, n_teachers))
-        for id in Teacher.ids:
-            Teacher.teachers.append(Teacher(id)) """
-
 class TimeSlot:
     slot_list: list = list()
     day: pd.DataFrame
@@ -183,16 +167,6 @@ class TimeSlot:
         self.course_index = course_index
         self.cr_index = cr_index
 
-    @staticmethod
-    def generate_day(n_slots: int, off_idxs: list[int]):
-        TimeSlot.ids = np.arange(n_slots)
-        TimeSlot.offs = np.full((n_slots,), fill_value=False, dtype=np.bool)
-        TimeSlot.offs[off_idxs] = True
-        TimeSlot.slot_array = np.column_stack([TimeSlot.ids, TimeSlot.offs])
-
-        TimeSlot.slot_list = [TimeSlot(id, is_off) for id, is_off in zip(TimeSlot.ids, TimeSlot.offs)]
-        TimeSlot.day = pd.DataFrame(TimeSlot.slot_array, columns=["id", "is_off"], index=None)
-        #TimeSlot.display()
 
     def generate_week(n_days: int, n_slots_per_day: int, off_slot_lists_per_day):
         total_slots = n_days * n_slots_per_day
@@ -214,72 +188,10 @@ class TimeSlot:
         TimeSlot.day = pd.DataFrame(TimeSlot.slot_array, columns=["id", "is_off"])
         #TimeSlot.display()
 
-
-    @staticmethod
-    def get_available_blocks(block_size: int):
-        blocks = []
-        for start_idx in range(len(TimeSlot.slot_list) - block_size + 1):
-            block = TimeSlot.slot_list[start_idx:start_idx + block_size]
-            if all(not slot.is_off for slot in block):
-                blocks.append(block)
-        return blocks
-
     @staticmethod
     def display():
         print(TimeSlot.day)
 
-def generate_targets(
-        area: np.ndarray,
-        seed: int = None,
-        shape: tuple[int, int] = (50, 2),
-        show = False
-        ):
-    deployment_bbox = area.reshape(-1, 2)
-    X = np.empty(shape)
-    n, d = shape
-
-    for j in range(d):
-        X[:, j] = np.round(np.random.uniform(deployment_bbox[j, 0], deployment_bbox[j, 1], size=n), 0)
-
-    if show:
-        plt.scatter(X[:, 0], X[:, 1], c='r', marker='*')
-        plt.scatter(X[:, 0], X[:, 1], c='y', marker='+')
-        plt.show()
-    
-    return X, area
-
-
-def generate_bboxes(n, m, space_min=0, space_max=100):
-    grid_size = int(np.sqrt(n))
-    step = (space_max - space_min) / grid_size
-    
-    centers = [
-        [space_min + (i + 0.5) * step, space_min + (j + 0.5) * step]
-        for i in range(grid_size)
-        for j in range(grid_size)
-    ]
-    bounding_boxes = np.array([
-        [x - m, x + m, y - m, y + m] for x, y in centers
-    ])
-    
-    return np.array(centers), bounding_boxes
-
-
-def distribute_rooms(room_ids, faculty_count):
-    #random.shuffle(room_ids)
-    faculty_rooms = [[] for _ in range(faculty_count)]
-    
-    chunk_size = len(room_ids) // faculty_count
-    remainder = len(room_ids) % faculty_count
-    
-    start = 0
-    for i in range(faculty_count):
-        extra = 1 if i < remainder else 0
-        end = start + chunk_size + extra
-        faculty_rooms[i] = room_ids[start:end]
-        start = end
-    
-    return faculty_rooms
 
 class Room:
     rooms: pd.DataFrame
@@ -287,11 +199,6 @@ class Room:
     ids: np.ndarray
     capacities: np.ndarray
     room_array: np.ndarray
-    room_locations: np.ndarray
-    Faculty_ids: list = list()
-    
-    #day_idxs: np.ndarray = np.zeros_like(ids)
-    # type_id : np.ndarray
 
     def __init__(
             self,
@@ -299,57 +206,17 @@ class Room:
             room_code: str,
             capacity: int,
             c_type: str,
-            # type_idx
     ):
         self.id = int(id)
         self.capacity = int(capacity)
         self.room_code = room_code
         self.c_type = c_type
-        print(f"c_type: {self.c_type}")
         self.is_lab = c_type == "Lab"
         if self.is_lab:
             short = "L"
         else:
             short = "D"
         self.shorthand = short
-
-    def generate_rooms(capacities: tuple[tuple[int, int]], faculty: int):
-        m = 100
-        centers, bboxes = generate_bboxes(faculty, 15, 0, 100)
-
-        Room.ids = np.arange(0, sum([room_count for room_count, _ in capacities]))
-        Room.capacities = np.hstack([[seat_count] * room_count for room_count, seat_count in capacities])
-        np.random.shuffle(Room.capacities)
-        
-        faculty_rooms = distribute_rooms([int(id) for id in Room.ids], faculty_count=faculty)
-        print(faculty_rooms)
-
-        faculty_ids = []
-        for id in Room.ids:
-            for i, subset in enumerate(faculty_rooms):
-                if id in subset:
-                    faculty_ids.append(i)
-
-        Room.Faculty_ids = faculty_ids
-
-        rooms = []
-        for i in range(faculty):
-            area = bboxes[i].reshape(2, 2)
-            room_locations, _ = generate_targets(area=bboxes[i], seed=None, shape=(len(faculty_rooms[i]), 2))
-            rooms.append(room_locations)
-        rooms = np.vstack(rooms)
-        Room.room_locations = rooms
-
-        Room.room_list = [Room(id, capacity, locations, faculty_id) for id, capacity, locations, faculty_id in zip(Room.ids, Room.capacities, Room.room_locations, faculty_ids)]
-        Room.room_array = np.column_stack([Room.ids, Room.capacities])
-
-        Room.rooms = pd.DataFrame({
-            "id": Room.ids,
-            "capacity": Room.capacities,
-            "location": [list(loc) for loc in rooms],
-            "faculty_id": faculty_ids
-        })
-        #Room.display()
 
     @staticmethod
     def read_classroom_data(path: str):
@@ -384,63 +251,6 @@ class Room:
     def display():
         print(Room.rooms)
     
-def display_results(R, T, x, solver, capacity=None, n_students=None):
-
-
-    for (course, slot, room), var in x.items():
-        if var.solution_value() == 1: 
-
-            if capacity and n_students:
-                cap = capacity(room)
-                enroll = n_students(course)
-                wasted = cap - enroll
-                print(f"Assigned: Course {course}, Slot {slot}, Room {room} "
-                      f"(Capacity={cap}, Students={enroll}, Wasted={wasted})")
-            else:
-                print(f"Assigned: Course {course}, Slot {slot}, Room {room}")
-
-    
-    rooms = R.ids    
-    slots = T.ids     
-    
-    timetable = pd.DataFrame(0, index=slots, columns=rooms)
-
-    for (course, slot, room), var in x.items():
-        if var.solution_value() == 1:
-            timetable.at[slot, room] = course+1
-    
-    import datetime
-    time_indexes = [datetime.time(h+8, 30).strftime("%H:%M") for h in list(range(0, len(T.slot_list)))]
-    print(time_indexes)
-    timetable.index = time_indexes
-    
-    print("\nTime Slot / Room Assignment Table:")
-    print(timetable)
-
-def display_interval_results(courses, rooms, solver, 
-                             start_vars, is_in_room_vars, block_size):
-    """
-    - courses: list of course objects
-    - rooms: list of room objects
-    - solver: the CpSolver
-    - start_vars, is_in_room_vars: dictionaries linking (course, block, room)
-      to the solver variables
-    - block_size: dictionary or function giving the length of each block
-    """
-    for course in courses:
-        for i, blk_size in enumerate(course.get_blocks):
-            # Suppose we stored: start_vars[(course, i)]
-            start_val = solver.Value(start_vars[(course.id, i)])
-            assigned_room = None
-            # figure out which room got is_in_room_vars=1
-            for r in rooms:
-                if solver.Value(is_in_room_vars[(course.id, i, r.id)]) == 1:
-                    assigned_room = r.id
-                    break
-            
-            print(f"Course {course.id}, Block {i}, "
-                  f"starts at slot {start_val}, length={blk_size}, "
-                  f"Room={assigned_room}")
 
 from collections import defaultdict
 
@@ -473,7 +283,6 @@ def build_timetable(courses, rooms, horizon, solver, start_vars, is_in_room_vars
     print(f"sum times used: {(sum(times_used))}")
     print(f"sum total block usage: {(sum(total_block_usage))}")
 
-
     import datetime
     time_indexes = [datetime.time(h+8, 30).strftime("%H:%M") for h in list(range(9))]
     day_length = horizon // n_days  # e.g., if horizon=63 for 7 days, day_length=9
@@ -488,17 +297,27 @@ def build_timetable(courses, rooms, horizon, solver, start_vars, is_in_room_vars
         day_df.columns = [f"Rm{rooms[i].id}({rooms[i].capacity}[F{rooms[i].faculty_id}])" for i in range(len(rooms))]
         day_tables.append(day_df)
         
-        
-
+    
     # day_tables[d] is the timetable slice for day d
     return day_tables
 
-def build_timetable2(rooms, horizon, n_days):
+def build_timetable2(courses, rooms, horizon, n_days, solver, start_vars, is_in_room_vars):
     import datetime
     import pandas as pd
     
     room_ids = [r.id for r in rooms]
     timetable = pd.DataFrame("", index=range(horizon), columns=room_ids)
+
+    for e in courses:
+        start_val = solver.Value(start_vars[e.id])
+        duration = e.get_duration()
+        for t in range(start_val, start_val + duration):
+            for r in rooms:
+                current_val = timetable.at[t, r.id]
+                if current_val:  # Means it's not an empty string
+                    timetable.at[t, r.id] = current_val + "|" + f"C{e.id}({e.year}:{e.n_students})"
+                else:
+                    timetable.at[t, r.id] = f"{e.course_code}({e.year}:{e.n_students})"
 
     time_indexes = [
         datetime.time(h + 8, 30).strftime("%H:%M") for h in range(9)
@@ -557,13 +376,6 @@ def get_off_chunks(slot_list):
         off_chunks.append((first, last+1))
     
     return off_chunks
-
-
-def find_subset_of_course(c: Course, subsets: list[list[Course]]):
-    for i, subset in enumerate(subsets):
-        if c in subset:
-            return i
-    raise Exception(f"Course {c.id} not found course_list")
 
 def main_multi_day():
     num_days = 5
@@ -935,18 +747,96 @@ def exam_scheduling_main():
     course_xlsx = "./data/fall2425_course_info - Copy.xlsx"
     room_xlsx = "./data/New Microsoft Excel Worksheet.xlsx"
     Course.read_courses(course_xlsx)
-    Course.display()
+    #Course.display()
     #Room.generate_rooms(((1, 40), (8, 72), (3, 80), (1, 88), (1, 120), (2, 32), (2, 96), (6, 64)), year)
     Room.read_classroom_data(room_xlsx)
     off_by_day = [[4] for _ in range(num_days)]
     off_by_day[-1] = off_by_day[-1] + [5]
     TimeSlot.generate_week(num_days, slots_per_day, off_by_day)
 
-    timetable_df = build_timetable2(Room.room_list, len(TimeSlot.slot_list), num_days)
-    for day_name, df in timetable_df:
-        print(day_name)
-        print(df)
-        print()
+    horizon = num_days * slots_per_day
+    model = cp_model.CpModel()
+
+    # 0) Build intervals for each exam e (start_e, end_e) so we know which exams overlap
+    start = {}
+    end = {}
+    interval_var = {}
+    for e in Course.course_list:
+        start[e.id] = model.NewIntVar(0, horizon - e.get_duration(), f"start_e{e.id}")
+        end[e.id] = model.NewIntVar(0, horizon, f"end_e{e.id}")
+        model.Add(end[e.id] == start[e.id] + e.get_duration())
+        interval_var[e.id] = model.NewIntervalVar(start[e.id], e.get_duration(), end[e.id], f"interval_e{e.id}")
+
+    # 1) seat[e, r] = number of seats in room r for exam e
+    seat = {}
+    in_room = {}
+    for e in Course.course_list:
+        for r in Room.room_list:
+            seat[(e.id, r.id)] = model.NewIntVar(0, r.capacity, f"seat_e{e.id}_r{r.id}")
+            in_room[(e.id, r.id)] = model.NewBoolVar(f"in_room_e{e.id}_r{r.id}")
+
+            # Link seat[e, r] to in_room[e, r]
+            model.Add(seat[(e.id, r.id)] <= r.capacity * in_room[(e.id, r.id)])
+
+    # 2) Must seat all students of exam e
+    for e in Course.course_list:
+        model.Add(sum(seat[(e.id, r.id)] for r in Room.room_list) == e.n_students)
+
+    # 3) Overlapping exam capacity constraint for each room
+    for r in Room.room_list:
+        model.AddCumulative(
+            intervals=[interval_var[e.id] for e in Course.course_list],
+            demands=[seat[(e.id, r.id)] for e in Course.course_list],
+            capacity=r.capacity
+        )
+
+    
+    ss = 0
+    for r in Room.room_list:
+        if r.is_lab:
+            ss += r.capacity
+            print(r.room_code, r.capacity)
+    print(f"total lab capacity: {ss}")
+    for c in Course.course_list:
+        if c.requires_lab:
+            print(c.course_code, c.n_students)
+
+    # 4) If exam e requires lab => seat[e, r] must be 0 for non-lab rooms
+    for e in Course.course_list:
+        if e.requires_lab:
+            for r in Room.room_list:
+                if not r.is_lab:
+                    model.Add(seat[(e.id, r.id)] == 0)
+
+    """
+    5) Objective: Minimize total room usage (i.e., the number of rooms used by each exam)
+    We can define: in_room[e, r] => 1 if seat[e, r] > 0, 0 if seat[e, r] = 0
+    Already done partial linking, but we also need seat[e, r] >= 1 => in_room[e, r] = 1:
+    We'll do a big-M style approach: seat[e, r] > 0 => in_room[e, r] = 1
+    Already we have seat[e, r] <= r.capacity * in_room[e, r], but we also want the reverse
+    """
+    for e in Course.course_list:
+        for r in Room.room_list:
+            model.Add(seat[(e.id, r.id)] >= 1).OnlyEnforceIf(in_room[(e.id, r.id)])
+
+    """
+    If we allow x = 0 or partial usage, you can do seat[e, r] > 0 + epsilon
+    But we usually do seat[e, r] > 0 => in_room[e, r] = 1 => can be done with reified constraints
+    """
+    #model.Minimize(in_room[(e.id, r.id)] for e in Course.course_list for r in Room.room_list)
+
+    # Solve
+    solver = cp_model.CpSolver()
+    status = solver.solve(model)
+    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        timetable_df = build_timetable2(Course.course_list, Room.room_list, horizon, num_days, solver, start, in_room)
+        for day_name, df in timetable_df:
+            print(day_name)
+            print(df)
+            print()
+    else:
+        print("No solution")
+
 
 
 if __name__ == "__main__":
