@@ -15,7 +15,7 @@ class Department:
         self.id = len(Department.departments)
         Department.department_ids.append(self.id)
 
-        self.department_name = department_name
+        self.name = department_name
         Department.department_names.append(department_name)
         Department.departments.append(self)
 
@@ -301,7 +301,7 @@ def build_timetable(courses, rooms, horizon, solver, start_vars, is_in_room_vars
     # day_tables[d] is the timetable slice for day d
     return day_tables
 
-def build_timetable2(courses, rooms, horizon, n_days, solver, start_vars, is_in_room_vars):
+def build_timetable2(courses, rooms, horizon, n_days, solver, start_vars, is_in_room_vars, seat):
     import datetime
     import pandas as pd
     
@@ -313,22 +313,31 @@ def build_timetable2(courses, rooms, horizon, n_days, solver, start_vars, is_in_
         duration = e.get_duration()
         for t in range(start_val, start_val + duration):
             for r in rooms:
-                current_val = timetable.at[t, r.id]
-                if current_val:  # Means it's not an empty string
-                    timetable.at[t, r.id] = current_val + "|" + f"C{e.id}({e.year}:{e.n_students})"
-                else:
-                    timetable.at[t, r.id] = f"{e.course_code}({e.year}:{e.n_students})"
+                in_room = solver.Value(is_in_room_vars[(e.id, r.id)])
+                
+                if in_room == 1:
+                    current_val = timetable.at[t, r.id]
+                    # Append info about how many seats are used
+                    exam_info = f"{e.course_code}({e.n_students})"
+                    
+                    if current_val:  # cell isn't empty
+                        timetable.at[t, r.id] = current_val + "|" + exam_info
+                    else:
+                        timetable.at[t, r.id] = exam_info
+
 
     time_indexes = [
         datetime.time(h + 8, 30).strftime("%H:%M") for h in range(9)
     ]
     day_length = horizon // n_days  # e.g., if horizon=63 for 7 days, day_length=9
 
-    day_names = ["Pazartesi", "Sali", "Carsamba", "Persembe", "Cuma"]
+    """ day_names = ["Pazartesi", "Sali", "Carsamba", "Persembe", "Cuma"]
     if n_days == 6:
-        day_names = day_names + ["Cumartesi"]
+        day_names = day_names + ["Cumartesi"] """
+    day_names = ["Day - " + str(i) for i in range(1, n_days + 1)]
 
     day_tables = []
+    all_days = []
     for d in range(n_days):
         start_row = d * day_length
         end_row   = (d + 1) * day_length
@@ -339,11 +348,102 @@ def build_timetable2(courses, rooms, horizon, n_days, solver, start_vars, is_in_
             f"{rooms[i].room_code}({rooms[i].capacity})"
             for i in range(len(rooms))
         ]
-
+        day_df['Day'] = day_names[d]
         # Store as a tuple (day_name, dataframe)
+        all_days.append(day_df)
         day_tables.append((day_names[d], day_df))
-        
+    
+    combined_df = pd.concat(all_days)
+    combined_df.to_excel("exam_schedule.xlsx")
+    #excelify(combined_df)
     return day_tables
+
+def excelify(output_filename="exam_schedule.xlsx"):
+    import pandas as pd
+    combined_df = pd.read_excel(output_filename)
+    
+    # Ensure "Day" is the first column.
+    cols = combined_df.columns.tolist()
+    if "Day" in cols and cols[0] != "Day":
+        cols.remove("Day")
+        cols = ["Day"] + cols
+        combined_df = combined_df[cols]
+    
+    # Write the DataFrame to Excel using XlsxWriter.
+    writer = pd.ExcelWriter("EDITED_" + output_filename, engine="xlsxwriter")
+    combined_df.to_excel(writer, index=False, sheet_name="Schedule")
+    
+    workbook  = writer.book
+    worksheet = writer.sheets["Schedule"]
+
+    # Set column widths for all columns except Day column.
+    # Note: In XlsxWriter, width is specified in character units.
+    # Roughly, 1 character ~ 7 pixels so 110 pixels is about 15.7.
+    # We set the width to 16 for columns other than the first ("Day").
+    num_columns = len(combined_df.columns)
+    # Columns are zero-indexed; Day column is column 0.
+    worksheet.set_column(1, num_columns - 1, 16)
+
+    # If desired, you can set the Day column width to something smaller.
+    worksheet.set_column(0, 0, 12)
+    
+    # Now, merge the Day cells per day group and apply alternate row coloring.
+    # We assume the DataFrame is sorted by the "Day" column.
+    header_rows = 1  # Header occupies row 0.
+    current_day = None
+    start_idx = None   # index in combined_df for start of a day group
+    group_index = 0    # counts day groups for alternate coloring
+    
+    # Define a format for alternate day rows (faint yellow).
+    yellow_format = workbook.add_format({'bg_color': '#FFFFE0'})
+    
+    # We'll also store the row ranges for each day group.
+    for i, row in combined_df.iterrows():
+        day = row["Day"]
+        if day != current_day:
+            if current_day is not None:
+                # For the previous group, merge the Day column.
+                first_row = header_rows + start_idx
+                last_row  = header_rows + i - 1
+                worksheet.merge_range(first_row, 0, last_row, 0, current_day)
+                # If this group is meant to be colored, set the row format.
+                if group_index % 2 == 0:
+                    for r_idx in range(first_row, last_row + 1):
+                        worksheet.set_row(r_idx, None, yellow_format)
+                group_index += 1
+            current_day = day
+            start_idx = i
+    # Handle the last group.
+    if current_day is not None:
+        first_row = header_rows + start_idx
+        last_row  = header_rows + i
+        worksheet.merge_range(first_row, 0, last_row, 0, current_day)
+        if group_index % 2 == 0:
+            for r_idx in range(first_row, last_row + 1):
+                worksheet.set_row(r_idx, None, yellow_format)
+    
+    for col in range(1, num_columns):
+        row = header_rows  # start after header
+        while row < header_rows + len(combined_df):
+            current_val = combined_df.iloc[row - header_rows, col]
+            if current_val != "":
+                start_merge = row
+                next_row = row + 1
+                # Find how many consecutive rows have the same value.
+                while (next_row < header_rows + len(combined_df) and 
+                    combined_df.iloc[next_row - header_rows, col] == current_val):
+                    next_row += 1
+                end_merge = next_row - 1  # last row with the same value
+
+                if end_merge > start_merge:
+                    worksheet.merge_range(start_merge, col, end_merge, col, current_val)
+                row = next_row  # move row pointer past this merged block
+            else:
+                row += 1
+    writer._save()
+
+       
+
 
 def get_off_chunks(slot_list):
     """
@@ -750,8 +850,9 @@ def exam_scheduling_main():
     #Course.display()
     #Room.generate_rooms(((1, 40), (8, 72), (3, 80), (1, 88), (1, 120), (2, 32), (2, 96), (6, 64)), year)
     Room.read_classroom_data(room_xlsx)
+    # days: [pazartesi, sali, carsamba, persembe, cuma, cumartesi]
     off_by_day = [[4] for _ in range(num_days)]
-    off_by_day[-1] = off_by_day[-1] + [5]
+    off_by_day[4] = off_by_day[4] + [5]
     TimeSlot.generate_week(num_days, slots_per_day, off_by_day)
 
     horizon = num_days * slots_per_day
@@ -772,34 +873,65 @@ def exam_scheduling_main():
     in_room = {}
     for e in Course.course_list:
         for r in Room.room_list:
-            seat[(e.id, r.id)] = model.NewIntVar(0, r.capacity, f"seat_e{e.id}_r{r.id}")
-            in_room[(e.id, r.id)] = model.NewBoolVar(f"in_room_e{e.id}_r{r.id}")
+            if not r.is_lab:
+                # if room is not a lab use half capacity
+                seat[(e.id, r.id)] = model.NewIntVar(0, r.capacity // 2, f"seat_e{e.id}_r{r.id}")
+                in_room[(e.id, r.id)] = model.NewBoolVar(f"in_room_e{e.id}_r{r.id}")
 
-            # Link seat[e, r] to in_room[e, r]
-            model.Add(seat[(e.id, r.id)] <= r.capacity * in_room[(e.id, r.id)])
+                # Link seat[e, r] to in_room[e, r]
+                model.Add(seat[(e.id, r.id)] <= (r.capacity // 2) * in_room[(e.id, r.id)])
+            else:
+                # if room is a lab don't half it
+                seat[(e.id, r.id)] = model.NewIntVar(0, r.capacity, f"seat_e{e.id}_r{r.id}")
+                in_room[(e.id, r.id)] = model.NewBoolVar(f"in_room_e{e.id}_r{r.id}")
+
+                # Link seat[e, r] to in_room[e, r]
+                model.Add(seat[(e.id, r.id)] <= (r.capacity) * in_room[(e.id, r.id)])
 
     # 2) Must seat all students of exam e
     for e in Course.course_list:
         model.Add(sum(seat[(e.id, r.id)] for r in Room.room_list) == e.n_students)
 
-    # 3) Overlapping exam capacity constraint for each room
-    for r in Room.room_list:
-        model.AddCumulative(
-            intervals=[interval_var[e.id] for e in Course.course_list],
-            demands=[seat[(e.id, r.id)] for e in Course.course_list],
-            capacity=r.capacity
-        )
-
-    
-    ss = 0
+    """ # 3) Overlapping exam capacity constraint for each room
     for r in Room.room_list:
         if r.is_lab:
-            ss += r.capacity
-            print(r.room_code, r.capacity)
-    print(f"total lab capacity: {ss}")
-    for c in Course.course_list:
-        if c.requires_lab:
-            print(c.course_code, c.n_students)
+            model.AddCumulative(
+                intervals=[interval_var[e.id] for e in Course.course_list],
+                demands=[seat[(e.id, r.id)] for e in Course.course_list],
+                capacity=r.capacity
+            )
+        else:
+            model.AddCumulative(
+                intervals=[interval_var[e.id] for e in Course.course_list],
+                demands=[seat[(e.id, r.id)] for e in Course.course_list],
+                capacity=r.capacity
+            ) """
+
+    opt_int_per_room = {r.id: [] for r in Room.room_list}
+    for e in Course.course_list:
+        for r in Room.room_list:
+            # Create an optional interval variable for exam e in room r
+            opt_interval = model.NewOptionalIntervalVar(
+                start[e.id],
+                e.get_duration(),
+                end[e.id],
+                in_room[(e.id, r.id)],
+                f"opt_interval_e{e.id}_r{r.id}"
+            )
+            opt_int_per_room[r.id].append(opt_interval)
+    
+    for r in Room.room_list:
+        model.AddNoOverlap(opt_int_per_room[r.id])
+
+    dept_year_intervals = {}
+    for department in Department.departments:
+        for year, year_courses in department.curriculums.items():
+            # Collect interval variables for all exams in this department and year
+            intervals = [interval_var[e.id] for e in year_courses]
+            dept_year_intervals[(department.id, year)] = intervals
+    
+    for key, intervals in dept_year_intervals.items():
+        model.AddNoOverlap(intervals)
 
     # 4) If exam e requires lab => seat[e, r] must be 0 for non-lab rooms
     for e in Course.course_list:
@@ -807,6 +939,11 @@ def exam_scheduling_main():
             for r in Room.room_list:
                 if not r.is_lab:
                     model.Add(seat[(e.id, r.id)] == 0)
+        else:
+            for r in Room.room_list:
+                if r.is_lab:
+                    model.Add(seat[(e.id, r.id)] == 0)
+
 
     """
     5) Objective: Minimize total room usage (i.e., the number of rooms used by each exam)
@@ -823,13 +960,37 @@ def exam_scheduling_main():
     If we allow x = 0 or partial usage, you can do seat[e, r] > 0 + epsilon
     But we usually do seat[e, r] > 0 => in_room[e, r] = 1 => can be done with reified constraints
     """
-    #model.Minimize(in_room[(e.id, r.id)] for e in Course.course_list for r in Room.room_list)
+
+    # Maybe not needed
+    for e in Course.course_list:
+        day_c = model.NewIntVar(0, num_days - 1, f"day_c{e.id}")
+        model.Add(start[e.id] >= day_c * slots_per_day)
+        model.Add(start[e.id] + e.get_duration() <= (day_c + 1) * slots_per_day)
+        
+    off_chunks = get_off_chunks(TimeSlot.slot_list)
+    off_intervals_per_room = {r.id: [] for r in Room.room_list}
+    for r in Room.room_list:
+        for (start_off, end_off) in off_chunks:
+            off_int = model.NewIntervalVar(start_off, end_off - start_off, end_off,
+                                           f"unavail_r{r.id}_{start_off}_{end_off}")
+            off_intervals_per_room[r.id].append(off_int)
+
+    for r in Room.room_list:
+        model.AddNoOverlap(off_intervals_per_room[r.id] + opt_int_per_room[r.id])
+
+
+    #model.Minimize(sum(in_room[(e.id, r.id)] for e in Course.course_list for r in Room.room_list))
+
 
     # Solve
     solver = cp_model.CpSolver()
     status = solver.solve(model)
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        timetable_df = build_timetable2(Course.course_list, Room.room_list, horizon, num_days, solver, start, in_room)
+        if cp_model.OPTIMAL:
+            print("optiomal")
+        else:
+            print("feasible")
+        timetable_df = build_timetable2(Course.course_list, Room.room_list, horizon, num_days, solver, start, in_room, seat)
         for day_name, df in timetable_df:
             print(day_name)
             print(df)
@@ -845,4 +1006,9 @@ if __name__ == "__main__":
     random.seed(seed)   
 
     #main_multi_day()
-    exam_scheduling_main()
+    #exam_scheduling_main()
+    course_xlsx = "./data/fall2425_course_info - Copy.xlsx"
+    Course.read_courses(course_xlsx)
+    for d in Department.departments:
+        print(d.name, d.id)
+    excelify()
