@@ -325,7 +325,7 @@ def build_timetable2(courses, rooms, horizon, n_days, solver, start_vars, is_in_
                 if in_room == 1:
                     current_val = timetable.at[t, r.id]
                     # Append info about how many seats are used
-                    exam_info = f"{e.dep_short} {e.course_code}({e.n_students})"
+                    exam_info = f"{e.dep_short} {e.course_code}({e.n_students}:{e.year})"
                     
                     if current_val:  # cell isn't empty
                         timetable.at[t, r.id] = current_val + "|" + exam_info
@@ -899,9 +899,8 @@ def exam_scheduling_main():
     # ---------------------------
     # Basic parameters and data loading
     # ---------------------------
-    num_days = 5
+    num_days = 10
     slots_per_day = 9
-    year = 4
 
     # Read course and room data from Excel files.
     course_xlsx = "./data/fall2425_course_info - Copy.xlsx"
@@ -913,11 +912,11 @@ def exam_scheduling_main():
     # Here, off_by_day is a list with one sublist per day.
     off_by_day = [[4] for _ in range(num_days)]
     off_by_day[4] = off_by_day[4] + [5]  # For day 5, two off-slot indexes.
+    off_by_day[9] = off_by_day[9] + [5]  # For day 5, two off-slot indexes.
     TimeSlot.generate_week(num_days, slots_per_day, off_by_day)
 
     # Total number of time slots available.
     horizon = num_days * slots_per_day
-
     # ---------------------------
     # Create the CP model
     # ---------------------------
@@ -931,10 +930,16 @@ def exam_scheduling_main():
     end = {}
     interval_var = {}
     for e in Course.course_list:
-        # start time for exam e can be anywhere between 0 and (horizon - duration)
-        start[e.id] = model.NewIntVar(0, horizon - e.get_duration(), f"start_e{e.id}")
-        # end time is between 0 and horizon
-        end[e.id] = model.NewIntVar(0, horizon, f"end_e{e.id}")
+        if e.year == 1 or e.year == 3:
+            # start time for exam e can be anywhere between 0 and (horizon - duration)
+            start[e.id] = model.NewIntVar(0, horizon // 2 - e.get_duration(), f"start_e{e.id}")
+            # end time is between 0 and horizon
+            end[e.id] = model.NewIntVar(0, horizon // 2, f"end_e{e.id}")
+        else:
+            # start time for exam e can be anywhere between 0 and (horizon - duration)
+            start[e.id] = model.NewIntVar(horizon // 2, horizon - e.get_duration(), f"start_e{e.id}")
+            # end time is between 0 and horizon
+            end[e.id] = model.NewIntVar(horizon // 2, horizon, f"end_e{e.id}")
         # Fix exam duration: end = start + duration
         model.Add(end[e.id] == start[e.id] + e.get_duration())
         # Create the mandatory interval variable for exam e
@@ -1138,6 +1143,37 @@ def exam_scheduling_main():
                 print(day_name)
                 print(df)
                 print() """
+
+            exams_per_day = {}  # Dictionary mapping day index to count of exams
+
+            for e in Course.course_list:
+                exam_start = solver.Value(start[e.id])
+                # Compute day index. For a horizon divided into days with 'slots_per_day' slots,
+                # integer division gives the day (e.g. 0 for the first day, 1 for the second, etc.)
+                exam_day = exam_start // slots_per_day
+                exams_per_day[exam_day] = exams_per_day.get(exam_day, 0) + 1
+
+            print("Exams scheduled per day:")
+            for day, count in sorted(exams_per_day.items()):
+                print(f"Day {day}: {count} exams")
+
+            rooms_used_per_day = {}  # Dictionary mapping day index to a set of room IDs used on that day.
+
+            for e in Course.course_list:
+                exam_start = solver.Value(start[e.id])
+                # Determine the day index (assuming slots_per_day is defined)
+                exam_day = exam_start // slots_per_day
+                # Initialize the set for that day if necessary.
+                if exam_day not in rooms_used_per_day:
+                    rooms_used_per_day[exam_day] = set()
+                # For each room, if the exam is assigned to that room, add the room id.
+                for r in Room.room_list:
+                    if solver.Value(in_room[(e.id, r.id)]) == 1:
+                        rooms_used_per_day[exam_day].add(r.id)
+
+            # Now print the number of rooms used per day.
+            for day in sorted(rooms_used_per_day.keys()):
+                print(f"Day {day}: {len(rooms_used_per_day[day])} rooms used")
 
         else:
             print("No solution")
