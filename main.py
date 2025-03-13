@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import random
 from ortools.sat.python import cp_model
+from matplotlib import pyplot as plt
 
 class Department:
     departments = []
@@ -324,8 +325,9 @@ def build_timetable2(courses, rooms, horizon, n_days, solver, start_vars, is_in_
                 
                 if in_room == 1:
                     current_val = timetable.at[t, r.id]
+                    used_seats = solver.Value(seat[(e.id, r.id)])
                     # Append info about how many seats are used
-                    exam_info = f"{e.dep_short} {e.course_code}({e.n_students}:{e.year})"
+                    exam_info = f"{e.dep_short} {e.course_code}({used_seats}:{e.year})"
                     
                     if current_val:  # cell isn't empty
                         timetable.at[t, r.id] = current_val + "|" + exam_info
@@ -352,7 +354,7 @@ def build_timetable2(courses, rooms, horizon, n_days, solver, start_vars, is_in_
 
         day_df.index = time_indexes
         day_df.columns = [
-            f"{rooms[i].room_code}({rooms[i].capacity})"
+            f"{rooms[i].room_code}({rooms[i].capacity if rooms[i].is_lab else rooms[i].capacity // 2})"
             for i in range(len(rooms))
         ]
         day_df['Day'] = day_names[d]
@@ -895,7 +897,75 @@ def main_multi_day():
     else:
         print("No solution found (status={}).".format(status))
 
-def mission_report(solver, start, slots_per_day, in_room):
+def plot_dep_yer_exam_counts(dep_year_per_day, num_days):
+    grouped = {}
+    passed_deps = [0, 1, 2, 3, 4, 5, 6]
+    passed_deps.remove(0)
+    for (day, dep_id, year), count in dep_year_per_day.items():
+        if dep_id in passed_deps:
+            continue
+        key = (dep_id, year)
+        if key not in grouped:
+            grouped[key] = {}
+        grouped[key][day] = count
+
+    # Define colors for departments (each department gets one color).
+    # Adjust or expand this mapping as needed.
+    dept_colors = {
+        0: 'blue',
+        1: 'red',
+        2: 'green',
+        3: 'purple',
+        4: 'orange',
+        5: 'brown',
+        6: 'cyan'
+    }
+
+    # Define line styles for years.
+    year_linestyles = {
+        1: '-',   # solid
+        2: '--',  # dashed
+        3: '-.',  # dash-dot
+        4: ':'    # dotted
+    }
+
+    # Prepare x-axis values: assume days are 0-indexed and total days is num_days.
+    days = list(range(num_days))
+
+    # Plot one line for each (dep, year) group.
+    plt.figure(figsize=(10, 6))
+    for (dep_id, year), day_counts in grouped.items():
+        # For each day from 0 to num_days-1, use the count if exists, else 0.
+        y_values = [day_counts.get(d, 0) for d in days]
+        color = dept_colors.get(dep_id, 'black')  # default to black if not defined
+        linestyle = year_linestyles.get(year, '-')  # default to solid if not defined
+        plt.plot(days, y_values, color=color, linestyle=linestyle, 
+                marker='o', label=f"Dept {dep_id} Year {year}")
+
+    plt.xlabel("Day")
+    plt.ylabel("Exam Count")
+    plt.title("Exam Distribution by Department-Year per Day")
+    plt.xticks(days, [f"Day {d}" for d in days])
+    plt.legend()
+    plt.show()
+
+def plot_exam_per_day(exams_per_day, num_days):
+    x_values = list(range(1, num_days + 1))
+    # Get exam count for each day; if no exams scheduled, use 0.
+    y_values = [exams_per_day.get(day - 1, 0) for day in x_values]
+
+    # 3. Plot the results.
+    plt.figure(figsize=(8, 4))
+    plt.plot(x_values, y_values, marker='o', label='Total Exams')
+    plt.xlabel("Day")
+    plt.ylabel("Number of Exams")
+    plt.title("Exams Scheduled per Day")
+    plt.legend()  # This will display the label for the line.
+    plt.xticks(x_values)  # Ensure each day is labeled.
+    plt.show()
+
+
+def mission_report(solver, start, slots_per_day, in_room, num_days):
     # ---------------------------
     # 1. Count Total Exams Scheduled Per Day
     # ---------------------------
@@ -910,6 +980,8 @@ def mission_report(solver, start, slots_per_day, in_room):
     for day, count in sorted(exams_per_day.items()):
         print(f"  Day {day}: {count} exams")
         total_exam_amount += count
+
+    plot_exam_per_day(exams_per_day, num_days)
 
     print(f"Total exams: {total_exam_amount}")    
     # ---------------------------
@@ -946,6 +1018,8 @@ def mission_report(solver, start, slots_per_day, in_room):
     for (day, dep_id, year) in sorted(dep_year_per_day.keys()):
         count = dep_year_per_day[(day, dep_id, year)]
         print(f"  Day {day}, Department {dep_id}, Year {year}: {count} exams")
+
+    plot_dep_yer_exam_counts(dep_year_per_day, num_days)
 
 
 def exam_scheduling_main():
@@ -1044,8 +1118,16 @@ def exam_scheduling_main():
             opt_int_per_room[r.id].append(opt_interval)
     # Enforce no overlap for exams in each room.
     # Comment/Uncomment bellow for no-overlap in rooms
-    """ for r in Room.room_list:
-        model.AddNoOverlap(opt_int_per_room[r.id]) """
+
+    for r in Room.room_list:
+        #model.AddNoOverlap(opt_int_per_room[r.id])
+        
+        demands = [1 for e in Course.course_list]
+        model.AddCumulative(
+            intervals=[opt_int_per_room[r.id][i] for i in range(len(opt_int_per_room[r.id]))],
+            demands=demands,
+            capacity=1
+        )
 
     # --) Overlapping exam capacity constraint for each room
     for r in Room.room_list:
@@ -1116,20 +1198,26 @@ def exam_scheduling_main():
     # then enforce that the off intervals do not overlap with the exam optional intervals.
     # ---------------------------
     off_chunks = get_off_chunks(TimeSlot.slot_list)
-    off_intervals_per_room = {r.id: [] for r in Room.room_list}
-    for r in Room.room_list:
-        for (start_off, end_off) in off_chunks:
-            off_int = model.NewIntervalVar(start_off, end_off - start_off, end_off,
-                                           f"unavail_r{r.id}_{start_off}_{end_off}")
-            off_intervals_per_room[r.id].append(off_int)
-    # For each room, combine the off intervals with the exam intervals and enforce no overlap.
-    for r in Room.room_list:
-        model.AddNoOverlap(off_intervals_per_room[r.id] + opt_int_per_room[r.id])
+    for e in Course.course_list:
+        # Compute local_time_e: start[e] - day_e * slots_per_day.
+        day_e = model.NewIntVar(0, num_days - 1, f"day_e{e.id}")
+        model.AddDivisionEquality(day_e, start[e.id], slots_per_day)
+        local_time_e = model.NewIntVar(0, slots_per_day - 1, f"local_time_e{e.id}")
+        model.Add(local_time_e == start[e.id] - day_e * slots_per_day)
+    
+        for (off_start, off_end) in off_chunks:
+            B1 = model.NewBoolVar(f"B1_e{e.id}_{off_start}_{off_end}")
+            B2 = model.NewBoolVar(f"B2_e{e.id}_{off_start}_{off_end}")
+            
+            model.Add(end[e.id] <= off_start).OnlyEnforceIf(B1)
+            model.Add(start[e.id] >= off_end).OnlyEnforceIf(B2)
+            
+            model.AddBoolOr([B1, B2])
     
     # ---------------------------
     # (9) Balanced Exam Distribution
     # ---------------------------
-    """ local_day = {}
+    local_day = {}
     week_length = num_days // 2
 
     for e in Course.course_list:
@@ -1158,7 +1246,7 @@ def exam_scheduling_main():
                     model.Add(local_day[e.id] == i).OnlyEnforceIf(indicator)
                     model.Add(local_day[e.id] != i).OnlyEnforceIf(indicator.Not())
 
-                model.Add(count[(department.id, year, i)] == sum(indicators)) """
+                model.Add(count[(department.id, year, i)] == sum(indicators))
 
     """ tolarance = 1
     for department in Department.departments:
@@ -1171,7 +1259,7 @@ def exam_scheduling_main():
                 model.Add(count[(department.id, year, i)] >= lower_bound)
                 model.Add(count[(department.id, year, i)] <= upper_bound) """
     
-    """ total_deviation = []
+    total_deviation = []
     for department in Department.departments:
         for year, exams in department.curriculums.items():
             total_exams = len(exams)
@@ -1180,15 +1268,15 @@ def exam_scheduling_main():
                 deviation = model.NewIntVar(0, week_length, f"dev_dep{department.id}_year{year}_day{i}")
                 model.Add(deviation >= count[(department.id, year, i)] - int(target))
                 model.Add(deviation >= int(target) - count[(department.id, year, i)])
-                total_deviation.append(deviation) """
+                total_deviation.append(deviation)
             
 
     # ---------------------------
     # (9) (Optional) Objective: Minimize total room usage.
     # This would encourage the solver to assign each exam to as few rooms as possible.
     # Uncomment if needed.
-    """ total_room_usage = sum(in_room[(e.id, r.id)] for e in Course.course_list for r in Room.room_list)
-    tru_weight = 5 """
+    total_room_usage = sum(in_room[(e.id, r.id)] for e in Course.course_list for r in Room.room_list)
+    tru_weight = 3
     #model.Minimize(total_room_usage * tru_weight)
     # ---------------------------
 
@@ -1196,10 +1284,10 @@ def exam_scheduling_main():
     # (10) (Optional) Objective: Minimize sum deviation to balance the exams in each day.
     # This would encourage the solver to assign each exam from the same cirriculums to evenly spread out thourgh the week.
     # Uncomment if needed.
-    """ balanced_exams = sum(total_deviation)
+    balanced_exams = sum(total_deviation)
     balanced_weight = 1
-    all_objectives = balanced_exams * balanced_weight + total_room_usage * tru_weight """
-    #model.Minimize(all_objectives)
+    all_objectives = balanced_exams * balanced_weight + total_room_usage * tru_weight
+    model.Minimize(all_objectives)
     # ---------------------------
 
     
@@ -1208,7 +1296,7 @@ def exam_scheduling_main():
     # ---------------------------
     # Phase 1: Solve for a feasible solution without the optimization objective.
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 300
+    solver.parameters.max_time_in_seconds = 600
     solver.parameters.num_search_workers = 4
     status = solver.solve(model)
     
@@ -1219,7 +1307,7 @@ def exam_scheduling_main():
             print("feasible")
         # Build and print the timetable (build_timetable2 is assumed to exist)
         timetable_df = build_timetable2(Course.course_list, Room.room_list, horizon, num_days, solver, start, in_room, seat)
-        mission_report(solver, start, slots_per_day, in_room)
+        mission_report(solver, start, slots_per_day, in_room, num_days)
         """ hints = []
         for e in Course.course_list:
             hints.append((start[e.id], solver.Value(start[e.id])))
@@ -1275,6 +1363,8 @@ if __name__ == "__main__":
     exam_scheduling_main()
     course_xlsx = "./data/fall2425_course_info - Copy.xlsx"
     Course.read_courses(course_xlsx)
-    for d in Department.departments:
-        print(d.name, d.id)
+    """ for d in Department.departments:
+        #print(d.name, d.id)
+        for year, exams in d.curriculums.items():
+            print(f"Dep: {d.name} - {year} - {len(exams)}") """
     excelify(Department.departments)
