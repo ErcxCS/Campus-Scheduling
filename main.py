@@ -1138,7 +1138,7 @@ def exam_scheduling_main():
         model.AddCumulative(
             intervals=opt_int_per_room[r.id],
             demands=demands,
-            capacity=1
+            capacity=2
         )
 
     # ---------------------------
@@ -1223,14 +1223,10 @@ def exam_scheduling_main():
         if e.year in {1, 3}:
             model.AddDivisionEquality(local_day[e.id], start[e.id], slots_per_day)
         else:
-            model.AddDivisionEquality(
-                local_day[e.id],
-                model.NewIntVarFromDomain(cp_model.Domain.FromIntervals(
-                    [[slots_per_day * week_length, horizon - e.get_duration()]]
-                ),
-                f"second_week_{e.id}") - slots_per_day * week_length, slots_per_day
-            )
-    
+            shifted_start = model.NewIntVar(0, horizon - slots_per_day * week_length - e.get_duration(), f"shifted_start_{e.id}")
+            model.Add(shifted_start == start[e.id] - slots_per_day * week_length)
+            model.AddDivisionEquality(local_day[e.id], shifted_start, slots_per_day)
+                
     count = {}
     for department in Department.departments:
         for year, exams in department.curriculums.items():
@@ -1258,7 +1254,7 @@ def exam_scheduling_main():
                 model.Add(count[(department.id, year, i)] >= lower_bound)
                 model.Add(count[(department.id, year, i)] <= upper_bound) """
     
-    """ total_deviation = []
+    total_deviation = []
     for department in Department.departments:
         for year, exams in department.curriculums.items():
             total_exams = len(exams)
@@ -1267,7 +1263,7 @@ def exam_scheduling_main():
                 deviation = model.NewIntVar(0, week_length, f"dev_dep{department.id}_year{year}_day{i}")
                 model.Add(deviation >= count[(department.id, year, i)] - int(target))
                 model.Add(deviation >= int(target) - count[(department.id, year, i)])
-                total_deviation.append(deviation) """
+                total_deviation.append(deviation)
             
 
     # ---------------------------
@@ -1275,7 +1271,7 @@ def exam_scheduling_main():
     # This would encourage the solver to assign each exam to as few rooms as possible.
     # Uncomment if needed.
     total_room_usage = sum(in_room[(e.id, r.id)] for e in Course.course_list for r in Room.room_list)
-    tru_weight = 3
+    tru_weight = 2
     #model.Minimize(total_room_usage * tru_weight)
     # ---------------------------
 
@@ -1283,9 +1279,9 @@ def exam_scheduling_main():
     # (10) (Optional) Objective: Minimize sum deviation to balance the exams in each day.
     # This would encourage the solver to assign each exam from the same cirriculums to evenly spread out thourgh the week.
     # Uncomment if needed.
-    #balanced_exams = sum(total_deviation)
-    #balanced_weight = 2
-    all_objectives = total_room_usage * tru_weight
+    balanced_exams = sum(total_deviation)
+    balanced_weight = 5
+    all_objectives = total_room_usage * tru_weight + balanced_exams * balanced_weight
     model.Minimize(all_objectives)
     # ---------------------------
 
@@ -1296,7 +1292,7 @@ def exam_scheduling_main():
     # Phase 1: Solve for a feasible solution without the optimization objective.
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = 600
-    solver.parameters.num_search_workers = 4
+    solver.parameters.num_search_workers = 12
     solver.parameters.log_search_progress = True
     
     status = solver.solve(model)
