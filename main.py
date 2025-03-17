@@ -1100,6 +1100,7 @@ def exam_scheduling_main():
     for e in Course.course_list:
         model.Add(sum(seat[(e.id, r.id)] for r in Room.room_list) == e.n_students)
 
+
     # ---------------------------
     # (3) Room Scheduling: Optional Intervals & NoOverlap in Rooms
     # For each exam and room, create an optional interval variable that is active if the exam is assigned to that room.
@@ -1138,9 +1139,9 @@ def exam_scheduling_main():
         model.AddCumulative(
             intervals=opt_int_per_room[r.id],
             demands=demands,
-            capacity=2
+            capacity=1
         )
-
+   
     # ---------------------------
     # (4) Department/Year Conflict Constraint
     # For each department and year, ensure that exams do not overlap
@@ -1212,7 +1213,7 @@ def exam_scheduling_main():
             
             model.AddBoolOr([B1, B2])
     
-    # ---------------------------
+    """ # ---------------------------
     # (9) Balanced Exam Distribution
     # ---------------------------
     local_day = {}
@@ -1241,7 +1242,7 @@ def exam_scheduling_main():
                     model.Add(local_day[e.id] != i).OnlyEnforceIf(indicator.Not())
                     indicators.append(indicator)
 
-                model.Add(count[(department.id, year, i)] == sum(indicators))
+                model.Add(count[(department.id, year, i)] == sum(indicators)) """
 
     """ tolarance = 1
     for department in Department.departments:
@@ -1254,7 +1255,7 @@ def exam_scheduling_main():
                 model.Add(count[(department.id, year, i)] >= lower_bound)
                 model.Add(count[(department.id, year, i)] <= upper_bound) """
     
-    total_deviation = []
+    """ total_deviation = []
     for department in Department.departments:
         for year, exams in department.curriculums.items():
             total_exams = len(exams)
@@ -1263,26 +1264,141 @@ def exam_scheduling_main():
                 deviation = model.NewIntVar(0, week_length, f"dev_dep{department.id}_year{year}_day{i}")
                 model.Add(deviation >= count[(department.id, year, i)] - int(target))
                 model.Add(deviation >= int(target) - count[(department.id, year, i)])
-                total_deviation.append(deviation)
-            
+                total_deviation.append(deviation) """
+    
 
-    # ---------------------------
+    """ ################ Seat Utilization #################
+    active = {}
+    for e in Course.course_list:
+        for r in Room.room_list:
+            for t in TimeSlot.slot_list:
+                # For each exam e, room r, and time slot t:
+                active_var = model.NewBoolVar(f"active_e{e.id}_t{t.id}_r{r.id}")
+
+                # Create auxiliary Booleans for the conditions.
+                B_start = model.NewBoolVar(f"B_start_e{e.id}_t{t.id}_r{r.id}")
+                B_end   = model.NewBoolVar(f"B_end_e{e.id}_t{t.id}_r{r.id}")
+
+                # Reify: B_start is true if t >= start[e]
+                model.Add(t.id >= start[e.id]).OnlyEnforceIf(B_start)
+                model.Add(t.id < start[e.id]).OnlyEnforceIf(B_start.Not())
+
+                # Reify: B_end is true if t < end[e]
+                model.Add(t.id < end[e.id]).OnlyEnforceIf(B_end)
+                model.Add(t.id >= end[e.id]).OnlyEnforceIf(B_end.Not())
+
+                # Now, active_var should be true if and only if both B_start and B_end are true.
+                # One way to enforce that is to add the following:
+                model.AddBoolAnd([B_start, B_end]).OnlyEnforceIf(active_var)
+                # And conversely, if active_var is false, then at least one of B_start or B_end is false:
+                model.AddBoolOr([B_start.Not(), B_end.Not()]).OnlyEnforceIf(active_var.Not())
+
+                active[(e.id, t.id, r.id)] = active_var
+
+
+    usage = {}
+    for t in TimeSlot.slot_list:
+        for r in Room.room_list:
+            usage_terms = []
+            usage[(t.id, r.id)] = model.NewIntVar(0, r.capacity if r.is_lab else r.capacity//2, f"usage_t{t.id}_r{r.id}")
+            for e in Course.course_list:
+                # Create an auxiliary variable to represent the product of seat and active.
+                prod = model.NewIntVar(0, r.capacity if r.is_lab else r.capacity//2, f"prod_e{e.id}_t{t.id}_r{r.id}")
+                model.AddMultiplicationEquality(prod, [seat[(e.id, r.id)], active[(e.id, t.id, r.id)]])
+                usage_terms.append(prod)
+            model.Add(usage[(t.id, r.id)] == sum(usage_terms))
+
+    unused = {}   
+    for t in TimeSlot.slot_list:
+        for r in Room.room_list:
+            max_cap = r.capacity if r.is_lab else r.capacity//2
+            unused[(t.id, r.id)] = model.NewIntVar(0, max_cap, f"unused_{t.id}_r{r.id}")
+            model.Add(unused[(t.id, r.id)] == max_cap - usage[(t.id, r.id)]) """
+
+    """ # Ensure exams in a room sharing any time slot start simultaneously
+    for r in Room.room_list:
+        for t in TimeSlot.slot_list:
+            exams_active_at_t = []
+            for e in Course.course_list:
+                # Boolean: is exam e active at time slot t in room r
+                active = model.NewBoolVar(f"active_e{e.id}_t{t.id}_r{r.id}")
+
+                # Exam e active at t if (start[e] ≤ t.id < end[e]) and in_room[e,r]==1
+                model.Add(start[e.id] <= t.id).OnlyEnforceIf(active_start:=model.NewBoolVar(f"active_start_e{e.id}_t{t.id}_r{r.id}"))
+                model.Add(start[e.id] > t.id).OnlyEnforceIf(active_start.Not())
+
+                model.Add(end[e.id] > t.id).OnlyEnforceIf(active_end:=model.NewBoolVar(f"active_end_e{e.id}_t{t.id}_r{r.id}"))
+                model.Add(end[e.id] <= t.id).OnlyEnforceIf(active_end:=active_start.Not())
+
+                active_var = model.NewBoolVar(f"active_e{e.id}_at_t{t.id}_r{r.id}")
+                model.AddBoolAnd([active_start, active_end, in_room[(e.id, r.id)]]).OnlyEnforceIf(active_var)
+                model.AddBoolOr([active_start.Not(), active_end.Not(), in_room[(e.id, r.id)].Not()]).OnlyEnforceIf(active_var.Not())
+
+                exams_active_at_t.append((e, active_var))
+
+            # Force simultaneous start times for exams active together
+            for i in range(len(exams_active_at_t)):
+                for j in range(i + 1, len(exams_active_at_t)):
+                    e1 = exams_active_at_t[i][0]
+                    e2 = exams_active_at_t[j][0]
+
+                    # Only enforce if both exams are active at slot t
+                    both_active = model.NewBoolVar(f"both_active_e{e1.id}_e{e2.id}_t{t.id}_r{r.id}")
+                    model.AddBoolAnd([exams_active_at_t[i][1], exams_active_at_t[j][1]]).OnlyEnforceIf(both_active)
+                    model.AddBoolOr([exams_active_at_t[i][1].Not(), exams_active_at_t[j][1].Not()]).OnlyEnforceIf(both_active.Not())
+
+                    # Enforce equal start times if both exams active in same room at same slot
+                    model.Add(start[e1.id] == start[e2.id]).OnlyEnforceIf(both_active) """
+    
+    """ mission_active = {}
+    for r in Room.room_list:
+        for t in TimeSlot.slot_list:
+            mission_active[(r.id, t.id)] = model.NewBoolVar(f"mission_active_r{r.id}_t{t.id}")
+            
+            # A room mission is active if at least one exam is active at that time and assigned to that room:
+            exams_active_in_room_at_t = []
+            for e in Course.course_list:
+                exam_active_at_t = model.NewBoolVar(f"exam{e.id}_active_r{r.id}_t{t.id}")
+                
+                # e is active at time t if start[e] <= t.id < end[e] AND e is assigned to room r
+                model.Add(start[e.id] <= t.id).OnlyEnforceIf(exam_start:=model.NewBoolVar(f"exam{e.id}_starts_before_t{t.id}"))
+                model.Add(start[e.id] > t.id).OnlyEnforceIf(exam_start.Not())
+
+                model.Add(end[e.id] > t.id).OnlyEnforceIf(exam_end:=model.NewBoolVar(f"exam{e.id}_ends_after_t{t.id}"))
+                model.Add(end[e.id] <= t.id).OnlyEnforceIf(exam_end.Not())
+
+                model.AddBoolAnd([exam_start, exam_end, in_room[(e.id, r.id)]]).OnlyEnforceIf(exam_active_at_t)
+                model.AddBoolOr([exam_start.Not(), exam_end.Not(), in_room[(e.id, r.id)].Not()]).OnlyEnforceIf(exam_active_at_t.Not())
+
+                exams_active_in_room_at_t.append(exam_active_at_t)
+
+            # mission_active is true if at least one exam is active at t in room r
+            model.AddMaxEquality(mission_active[(r.id, t.id)], exams_active_in_room_at_t)
+
+    total_mission_count = sum(mission_active.values()) """
+
+    #model.Minimize(total_mission_count)
+
+    #seat_utilization = sum(unused[(t.id, r.id)] for t in TimeSlot.slot_list for r in Room.room_list)
+    seat_weight = 5
+            
     # (9) (Optional) Objective: Minimize total room usage.
     # This would encourage the solver to assign each exam to as few rooms as possible.
     # Uncomment if needed.
-    total_room_usage = sum(in_room[(e.id, r.id)] for e in Course.course_list for r in Room.room_list)
+
+    """ total_room_usage = sum(in_room[(e.id, r.id)] for e in Course.course_list for r in Room.room_list)
     tru_weight = 2
-    #model.Minimize(total_room_usage * tru_weight)
+    model.Minimize(total_room_usage * tru_weight) """
     # ---------------------------
 
     # ---------------------------
     # (10) (Optional) Objective: Minimize sum deviation to balance the exams in each day.
     # This would encourage the solver to assign each exam from the same cirriculums to evenly spread out thourgh the week.
     # Uncomment if needed.
-    balanced_exams = sum(total_deviation)
+    """ balanced_exams = sum(total_deviation)
     balanced_weight = 5
-    all_objectives = total_room_usage * tru_weight + balanced_exams * balanced_weight
-    model.Minimize(all_objectives)
+    all_objectives = total_room_usage * tru_weight + balanced_exams * balanced_weight #+ seat_utilization * seat_weight
+    model.Minimize(all_objectives) """
     # ---------------------------
 
     
