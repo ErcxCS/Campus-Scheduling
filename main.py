@@ -898,55 +898,36 @@ def main_multi_day():
         print("No solution found (status={}).".format(status))
 
 def plot_dep_yer_exam_counts(dep_year_per_day, num_days):
-    grouped = {}
-    passed_deps = [0, 1, 2, 3, 4, 5, 6]
-    passed_deps.remove(0)
-    for (day, dep_id, year), count in dep_year_per_day.items():
-        if dep_id in passed_deps:
-            continue
-        key = (dep_id, year)
-        if key not in grouped:
-            grouped[key] = {}
-        grouped[key][day] = count
+    keys = dep_year_per_day.keys()
+    dep_set = set()
+    for (day, dep_short, year) in keys:
+        dep_set.add(dep_short)
+    dep_set = list(dep_set)
 
-    # Define colors for departments (each department gets one color).
-    # Adjust or expand this mapping as needed.
-    dept_colors = {
-        0: 'blue',
-        1: 'red',
-        2: 'green',
-        3: 'purple',
-        4: 'orange',
-        5: 'brown',
-        6: 'cyan'
-    }
-
-    # Define line styles for years.
-    year_linestyles = {
-        1: '-',   # solid
-        2: '--',  # dashed
-        3: '-.',  # dash-dot
-        4: ':'    # dotted
-    }
-
-    # Prepare x-axis values: assume days are 0-indexed and total days is num_days.
+    fig, axes = plt.subplots(len(dep_set), 1, figsize=(12, 3 * len(dep_set)), sharex=True)
+    years = list(range(1, 5))
     days = list(range(num_days))
+    year_colors = ['blue', 'orange', 'green', 'purple']
 
-    # Plot one line for each (dep, year) group.
-    plt.figure(figsize=(10, 6))
-    for (dep_id, year), day_counts in grouped.items():
-        # For each day from 0 to num_days-1, use the count if exists, else 0.
-        y_values = [day_counts.get(d, 0) for d in days]
-        color = dept_colors.get(dep_id, 'black')  # default to black if not defined
-        linestyle = year_linestyles.get(year, '-')  # default to solid if not defined
-        plt.plot(days, y_values, color=color, linestyle=linestyle, 
-                marker='o', label=f"Dept {dep_id} Year {year}")
+    for idx, (key, val) in enumerate(dep_year_per_day.items()):
+        _, dep_short, _ = key
+        num_exams = val
+        ax = axes[dep_set.index(dep_short)]
+
+        for year in years:
+            y_values = [dep_year_per_day.get((day, dep_short, year), 0) for day in days]
+            days_filtered, y_values_filtered = zip(*[(day, val) for day, val in zip(days, y_values) if val != 0])
+
+            ax.plot(days_filtered, y_values_filtered, marker='o', color=year_colors[year-1])
+
+        ax.set_title(f"{dep_short}")
+        ax.set_ylabel("Exam Count")
+        ax.grid(True, linestyle='--', alpha=0.5)
 
     plt.xlabel("Day")
-    plt.ylabel("Exam Count")
-    plt.title("Exam Distribution by Department-Year per Day")
     plt.xticks(days, [f"Day {d}" for d in days])
-    plt.legend()
+    plt.suptitle("Exam Distribution by Department and Year per Day", fontsize=16, y=1.02)
+    plt.tight_layout()
     plt.show()
 
 def plot_exam_per_day(exams_per_day, num_days):
@@ -987,7 +968,7 @@ def mission_report(solver, start, slots_per_day, in_room, num_days):
     # ---------------------------
     # 2. Count Rooms Used Per Day
     # ---------------------------
-    rooms_used_per_day = {}  # Mapping: day index -> set of room IDs used on that day
+    """ rooms_used_per_day = {}  # Mapping: day index -> set of room IDs used on that day
     for e in Course.course_list:
         exam_start = solver.Value(start[e.id])
         exam_day = exam_start // slots_per_day
@@ -1000,7 +981,7 @@ def mission_report(solver, start, slots_per_day, in_room, num_days):
     print("Rooms used per day:")
     for day in sorted(rooms_used_per_day.keys()):
         print(f"  Day {day}: {len(rooms_used_per_day[day])} rooms used")
-    
+     """
     # ---------------------------
     # 3. Count Exams per Department-Year per Day
     # ---------------------------
@@ -1350,7 +1331,7 @@ def exam_scheduling_main():
                     # Enforce equal start times if both exams active in same room at same slot
                     model.Add(start[e1.id] == start[e2.id]).OnlyEnforceIf(both_active) """
     
-    """ mission_active = {}
+    mission_active = {}
     for r in Room.room_list:
         for t in TimeSlot.slot_list:
             mission_active[(r.id, t.id)] = model.NewBoolVar(f"mission_active_r{r.id}_t{t.id}")
@@ -1375,9 +1356,9 @@ def exam_scheduling_main():
             # mission_active is true if at least one exam is active at t in room r
             model.AddMaxEquality(mission_active[(r.id, t.id)], exams_active_in_room_at_t)
 
-    total_mission_count = sum(mission_active.values()) """
+    total_mission_count = sum(mission_active.values())
 
-    #model.Minimize(total_mission_count)
+    model.Minimize(total_mission_count)
 
     #seat_utilization = sum(unused[(t.id, r.id)] for t in TimeSlot.slot_list for r in Room.room_list)
     seat_weight = 5
