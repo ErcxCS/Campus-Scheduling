@@ -50,18 +50,19 @@ class Course:
         year: int,
         n_students: int,
         course_code: str,
-        shared: bool,
+        instructor_id: int,
         requires_lab: bool,
+        mandatory: str
     ):
         self.id = int(id)
         self.n_students = int(n_students)
         self.departments = [department]
         self.course_code = course_code
-        self.shared = shared
+        self.instructor_id = instructor_id
         self.requires_lab = requires_lab
         self.year = year
         self.course_name = course_name
-
+        self.mandatory = mandatory
         dep = self.departments[0]
         self.dep_short = dep.short
 
@@ -90,22 +91,23 @@ class Course:
         #print(course_df.head())
         for i, row in enumerate(course_df.values):
             department_name, \
+            course_code, \
             course_name, \
             year, \
+            mandatory, \
+            instructor_id, \
             n_students, \
-            course_code, \
-            shared, \
             requires_lab = row
             
             dep = Department.get_department(department_name)
-            if shared:
-                if course_code in Course.course_codes:
-                    course = Course.get_course(course_code)
+            if course_code in Course.course_codes:
+                course = Course.get_course(course_code)
+                if course.course_code == course_code and course.instructor_id == instructor_id:
                     course.add_department(dep, n_students)
                     dep.add_course(course)
                     continue
 
-            new_course = Course(i, dep, course_name, year, n_students, course_code, shared == 1, requires_lab == 1)
+            new_course = Course(i, dep, course_name, year, n_students, course_code, instructor_id, requires_lab == 1, mandatory)
             dep.add_course(new_course)
             Course.course_codes.add(course_code)
             Course.course_list.append(new_course)
@@ -1007,12 +1009,13 @@ def exam_scheduling_main():
     # ---------------------------
     # Basic parameters and data loading
     # ---------------------------
-    num_days = 10
+    num_days = 8
     slots_per_day = 9
 
     # Read course and room data from Excel files.
     course_xlsx = "./data/fall2425_course_info - Copy.xlsx"
     room_xlsx = "./data/New Microsoft Excel Worksheet.xlsx"
+    course_xlsx = "./data/BerkData2.xlsx"
     Course.read_courses(course_xlsx)
     Room.read_classroom_data(room_xlsx)
     
@@ -1405,7 +1408,8 @@ if __name__ == "__main__":
 
     #main_multi_day()
     exam_scheduling_main()
-    course_xlsx = "./data/fall2425_course_info - Copy.xlsx"
+    #course_xlsx = "./data/fall2425_course_info - Copy.xlsx"
+    course_xlsx = "./data/BerkData2.xlsx"
     Course.read_courses(course_xlsx)
     """ for d in Department.departments:
         #print(d.name, d.id)
