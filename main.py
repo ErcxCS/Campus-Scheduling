@@ -1044,14 +1044,10 @@ def exam_scheduling_main():
     for e in Course.course_list:
         if e.year == 1 or e.year == 3:
             # start time for exam e can be anywhere between 0 and (horizon - duration)
-            start[e.id] = model.NewIntVar(0, horizon // 2 - e.get_duration(), f"start_e{e.id}")
+            start[e.id] = model.NewIntVar(0, horizon - e.get_duration(), f"start_e{e.id}")
             # end time is between 0 and horizon
-            end[e.id] = model.NewIntVar(0, horizon // 2, f"end_e{e.id}")
-        else:
-            # start time for exam e can be anywhere between 0 and (horizon - duration)
-            start[e.id] = model.NewIntVar(horizon // 2, horizon - e.get_duration(), f"start_e{e.id}")
-            # end time is between 0 and horizon
-            end[e.id] = model.NewIntVar(horizon // 2, horizon, f"end_e{e.id}")
+            end[e.id] = model.NewIntVar(0, horizon, f"end_e{e.id}")
+
         # Fix exam duration: end = start + duration
         model.Add(end[e.id] == start[e.id] + e.get_duration())
         # Create the mandatory interval variable for exam e
@@ -1223,11 +1219,11 @@ def exam_scheduling_main():
     # (9) Balanced Exam Distribution
     # ---------------------------
     local_day = {}
-    week_length = num_days // 2
+    week_length = num_days #// 2 # might need to mess around here
 
     for e in Course.course_list:
         local_day[e.id] = model.NewIntVar(0, week_length - 1, f"local_day_e{e.id}")
-        if e.year in {1, 3}:
+        if e.year in {1, 2, 3, 4}: # changed for final scheduling 5/22/25 02:00
             model.AddDivisionEquality(local_day[e.id], start[e.id], slots_per_day)
         else:
             shifted_start = model.NewIntVar(0, horizon - slots_per_day * week_length - e.get_duration(), f"shifted_start_{e.id}")
@@ -1250,7 +1246,7 @@ def exam_scheduling_main():
 
                 model.Add(count[(department.id, year, i)] == sum(indicators))
 
-    tolarance = 1
+    tolarance = 1 ## might fuck up
     for department in Department.departments:
         for year, exams in department.curriculums.items():
             total_exams = len(exams)
