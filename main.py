@@ -1023,7 +1023,7 @@ def exam_scheduling_main():
     # Here, off_by_day is a list with one sublist per day.
     off_by_day = [[4] for _ in range(num_days)]
     off_by_day[4] = off_by_day[4] + [5]  # For day 5, two off-slot indexes.
-    off_by_day[9] = off_by_day[9] + [5]  # For day 9, two off-slot indexes.
+    #off_by_day[9] = off_by_day[9] + [5]  # For day 9, two off-slot indexes.
     #off_by_day[7] = off_by_day[7] + [i for i in range(slots_per_day) if i != 4] # simulating holiday
     TimeSlot.generate_week(num_days, slots_per_day, off_by_day)
 
@@ -1042,11 +1042,10 @@ def exam_scheduling_main():
     end = {}
     interval_var = {}
     for e in Course.course_list:
-        if e.year == 1 or e.year == 3:
-            # start time for exam e can be anywhere between 0 and (horizon - duration)
-            start[e.id] = model.NewIntVar(0, horizon - e.get_duration(), f"start_e{e.id}")
-            # end time is between 0 and horizon
-            end[e.id] = model.NewIntVar(0, horizon, f"end_e{e.id}")
+        # start time for exam e can be anywhere between 0 and (horizon - duration)
+        start[e.id] = model.NewIntVar(0, horizon - e.get_duration(), f"start_e{e.id}")
+        # end time is between 0 and horizon
+        end[e.id] = model.NewIntVar(0, horizon, f"end_e{e.id}")
 
         # Fix exam duration: end = start + duration
         model.Add(end[e.id] == start[e.id] + e.get_duration())
@@ -1146,7 +1145,8 @@ def exam_scheduling_main():
         model.AddNoOverlap(intervals) """
     
     dept_year_intervals = {}
-
+    # Not sure about below approach
+    # TODO consider scheduling consecutive years non-overlap, basically 1-3, 2-4
     for course in Course.course_list:
         for dep in course.departments:
             key = (dep.id, course.year)
