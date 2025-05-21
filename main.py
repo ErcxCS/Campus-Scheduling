@@ -1137,12 +1137,25 @@ def exam_scheduling_main():
     # For each department and year, ensure that exams do not overlap
     # (e.g., to avoid scheduling conflicts for students in the same curriculum).
     # ---------------------------
-    dept_year_intervals = {}
+    """ dept_year_intervals = {}
     for department in Department.departments:
         for year, year_courses in department.curriculums.items():
             intervals = [interval_var[e.id] for e in year_courses]
             dept_year_intervals[(department.id, year)] = intervals
     
+    for key, intervals in dept_year_intervals.items():
+        model.AddNoOverlap(intervals) """
+    
+    dept_year_intervals = {}
+
+    for course in Course.course_list:
+        for dep in course.departments:
+            key = (dep.id, course.year)
+            if key not in dept_year_intervals:
+                dept_year_intervals[key] = []
+            dept_year_intervals[key].append(interval_var[course.id])
+
+    # Now apply AddNoOverlap per department-year
     for key, intervals in dept_year_intervals.items():
         model.AddNoOverlap(intervals)
 
