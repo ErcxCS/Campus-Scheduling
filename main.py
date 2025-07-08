@@ -60,7 +60,8 @@ class Course:
         self.year = year
         self.course_name = course_name
         self.mandatory = mandatory
-        self.dep_short = department.short
+
+        self.dep_short = ' '.join(dep.short for dep in self.departments)
 
         # Each course is assumed to have exactly one block of duration 2
         # (This mirrors the old `get_blocks()` logic, which always returned [2].)
@@ -250,6 +251,38 @@ def build_timetable2(courses, rooms, horizon, n_days, solver, start_vars, in_roo
     combined = pd.concat([df for _, df in all_days])
     combined.to_excel("exam_schedule.xlsx", index=False)
     return all_days
+
+
+def department_exam_schedule(departments, courses, rooms, horizon, n_days, solver, start_vars, in_room_vars):
+    day_length = horizon // n_days
+    import datetime
+
+    for dep in departments:
+        data = []
+        for year, year_courses in dep.curriculums.items():
+            for course in year_courses:
+                start_var = solver.Value(start_vars[course.id])
+                nth_day = start_var // day_length + 1
+                start_time = start_var % day_length
+                date_time = datetime.time(start_time + 8, 30).strftime("%H:%M")
+                day_str = f"day - {nth_day}"
+
+                assigned_rooms = ""
+                for r in rooms:
+                    if solver.Value(in_room_vars[(course.id, r.id)]) == 1:
+                        assigned_rooms += r.room_code + " - "
+
+                data.append({
+                    'Year:': year,
+                    'Course ID': course.course_code,
+                    'Course Name': course.course_name,
+                    'Date': day_str,
+                    'Starting Hours': date_time,
+                    'Rooms': assigned_rooms
+                })
+        dep_df = pd.DataFrame(data)
+        excel_name = dep.name + ".xlsx"
+        dep_df.to_excel(excel_name, index=False)
 
 
 def plot_exam_per_day(exams_per_day, num_days):
@@ -457,7 +490,7 @@ def exam_scheduling_main():
             model.AddBoolOr([b1, b2])
 
     # (10) Balanced exam-per-department constraints
-    # (spread out each department-year’s exams roughly evenly across the 8 days)
+    # spread out each department-year’s exams roughly evenly across the 8 days
     local_day = {}
     week_len = num_days
     for e in Course.course_list:
@@ -539,55 +572,66 @@ def exam_scheduling_main():
         # Build the Excel‐output timetable
         build_timetable2(Course.course_list, Room.room_list, horizon, num_days,
                          solver, start, in_room, seat)
+        
+        department_exam_schedule(Department.departments,
+                                 Course.course_list,
+                                 Room.room_list,
+                                 horizon,
+                                 num_days,
+                                 solver,
+                                 start,
+                                 in_room)
         # Print and plot mission report
         mission_report(solver, start, slots_per_day, in_room, num_days)
     else:
         print("No solution found (status {}).".format(status))
 
+
 def excelify(dep_list: list, output_filename="exam_schedule.xlsx"):
     import pandas as pd
-    import numpy as np
 
     # Read the combined timetable DataFrame from the Excel file.
     combined_df = pd.read_excel(output_filename)
-    
+
     # Ensure "Day" is the first column.
     cols = combined_df.columns.tolist()
     if "Day" in cols and cols[0] != "Day":
         cols.remove("Day")
         cols = ["Day"] + cols
         combined_df = combined_df[cols]
-    
+
     # Write the DataFrame to Excel using XlsxWriter.
     writer = pd.ExcelWriter("EDITED2_" + output_filename, engine="xlsxwriter")
     combined_df.to_excel(writer, index=False, sheet_name="Schedule")
-    
-    workbook  = writer.book
+
+    workbook = writer.book
     worksheet = writer.sheets["Schedule"]
-    
+
     # Set column widths for all columns except Day column.
     num_columns = len(combined_df.columns)
     # Set columns 1 to end (i.e., room columns) to width 16 (~110px).
     worksheet.set_column(1, num_columns - 1, 16)
     # Set Day column (column 0) to a width of 12.
     worksheet.set_column(0, 0, 12)
-    
+
     # Now, merge the Day cells per day group and apply alternate row coloring.
     header_rows = 1  # Header occupies row 0.
     current_day = None
     start_idx = None   # index in combined_df for start of a day group
     group_index = 0    # counts day groups for alternate coloring
-    
-    # Define a format for alternate day rows (faint yellow) with center alignment (if desired)
+
+    # Define a format for alternate day rows (faint yellow) with center
     # (You can remove 'align' and 'valign' if you want no alignment.)
-    yellow_format = workbook.add_format({'bg_color': '#FFFFE0', 'align': 'center', 'valign': 'vcenter'})
-    
+    yellow_format = workbook.add_format({
+        'bg_color': '#FFFFE0', 'align': 'center', 'valign': 'vcenter'
+        })
+
     for i, row in combined_df.iterrows():
         day = row["Day"]
         if day != current_day:
             if current_day is not None:
                 first_row = header_rows + start_idx
-                last_row  = header_rows + i - 1
+                last_row = header_rows + i - 1
                 worksheet.merge_range(first_row, 0, last_row, 0, current_day)
                 if group_index % 2 == 0:
                     for r_idx in range(first_row, last_row + 1):
@@ -597,35 +641,43 @@ def excelify(dep_list: list, output_filename="exam_schedule.xlsx"):
             start_idx = i
     if current_day is not None:
         first_row = header_rows + start_idx
-        last_row  = header_rows + i
+        last_row = header_rows + i
         worksheet.merge_range(first_row, 0, last_row, 0, current_day)
         if group_index % 2 == 0:
             for r_idx in range(first_row, last_row + 1):
                 worksheet.set_row(r_idx, None, yellow_format)
-    
+
     # --------------------------
     # Department coloring setup:
     # --------------------------
     # Define a list of colors for departments.
-    color_list = ["#A9A9A9", "#800080", "#FFA500", "#FFFF00", "#FF0000", "#008000", "#ADD8E6"]
+    color_list = [
+        "#A9A9A9",
+        "#800080",
+        "#FFA500",
+        "#FFFF00",
+        "#FF0000",
+        "#008000",
+        "#ADD8E6"
+    ]
     # Build a mapping from department short to a color.
     dept_colors = {}
     for i, dep in enumerate(dep_list):
         dept_colors[dep.short] = color_list[i % len(color_list)]
-    
-    # Create a format for each department (only background color, no centering).
+
+    # Create a format for each department (only background color, no centering)
     dept_formats = {}
     for dep_short, color in dept_colors.items():
         dept_formats[dep_short] = workbook.add_format({'bg_color': color})
-    
+
     # Define a default format (if department info is not found).
     default_format = workbook.add_format({})
-    
-    # Initialize a dictionary to count the total number of colored cells for each department.
+
+    # Initialize a dictionary to count the total number of colored cells
     colored_counts = {dep_short: 0 for dep_short in dept_colors.keys()}
-    
+
     # -----------------------------------------------
-    # Merge cells vertically for identical exam intervals 
+    # Merge cells vertically for identical exam intervals
     # in each room column and apply department colors.
     # We assume each non-empty cell in a room column is in the format:
     #    "{dep_short} {course_code}({n_students})"
@@ -640,12 +692,12 @@ def excelify(dep_list: list, output_filename="exam_schedule.xlsx"):
                 start_merge = row
                 next_row = row + 1
                 # Find how many consecutive rows have the same value.
-                while (next_row < header_rows + len(combined_df) and 
-                       combined_df.iloc[next_row - header_rows, col] == current_val):
+                while (next_row < header_rows + len(combined_df) and
+                        combined_df.iloc[next_row - header_rows, col] == current_val):
                     next_row += 1
                 end_merge = next_row - 1  # Last row with the same value.
                 merged_length = end_merge - start_merge + 1
-                
+
                 # Extract the department short.
                 # We assume the cell is like "BM CS101(45)" so split on space.
                 try:
@@ -654,22 +706,29 @@ def excelify(dep_list: list, output_filename="exam_schedule.xlsx"):
                 except Exception:
                     cell_format = default_format
                     dep_short = None
-                
-                # If we got a valid department short and cell_format is not default,
-                # update the count.
+
+                # If we got a valid department short ,
+                # and cell_format is not default update the count.
                 if dep_short is not None and cell_format != default_format:
                     colored_counts[dep_short] += merged_length
-                
+
                 if end_merge > start_merge:
-                    worksheet.merge_range(start_merge, col, end_merge, col, current_val, cell_format)
+                    worksheet.merge_range(
+                        start_merge,
+                        col,
+                        end_merge,
+                        col,
+                        current_val,
+                        cell_format
+                    )
                 else:
                     worksheet.write(start_merge, col, current_val, cell_format)
                 row = next_row  # Move pointer past this merged block.
             else:
                 row += 1
-    
+
     writer._save()
-    
+
     # Print out the total number of colored cells for each department.
     print("Colored cells count by department:")
     total_mission = 0
@@ -679,6 +738,7 @@ def excelify(dep_list: list, output_filename="exam_schedule.xlsx"):
         print(f"Department {dep_short}: {true_count} cells")
 
     print(f"Total mission count: {total_mission}")
+
 
 if __name__ == "__main__":
     seed = None
