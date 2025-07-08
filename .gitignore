@@ -26,3 +26,6 @@ __pycache__/
 # Do not ignore the data folder and its contents
 !data/
 !data/**
+
+env/
+env/**
