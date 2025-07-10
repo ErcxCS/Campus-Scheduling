@@ -3,6 +3,7 @@ import pandas as pd
 import random
 from ortools.sat.python import cp_model
 from matplotlib import pyplot as plt
+import os
 
 
 class Department:
@@ -206,7 +207,7 @@ def get_off_chunks(slot_list):
     return off_chunks
 
 
-def build_timetable2(courses, rooms, horizon, n_days, solver, start_vars, in_room_vars, seat_vars):
+def build_timetable2(courses, rooms, horizon, n_days, solver, start_vars, in_room_vars, seat_vars, exp_path):
     """
     Builds a per‐day timetable DataFrame, writes it to "exam_schedule.xlsx",
     and returns a list of (day_name, DataFrame) tuples.
@@ -249,14 +250,16 @@ def build_timetable2(courses, rooms, horizon, n_days, solver, start_vars, in_roo
         all_days.append((day_names[d], df_day))
 
     combined = pd.concat([df for _, df in all_days])
-    combined.to_excel("exam_schedule.xlsx", index=False)
+    raw_schedule_path = os.path.join(exp_path, "exam_schedule.xlsx")
+    combined.to_excel(raw_schedule_path, index=False)
     return all_days
 
 
-def department_exam_schedule(departments, courses, rooms, horizon, n_days, solver, start_vars, in_room_vars):
+def department_exam_schedule(departments, courses, rooms, horizon, n_days, solver, start_vars, in_room_vars, exp_path):
     day_length = horizon // n_days
     import datetime
-
+    timetables_path = os.path.join(exp_path, "department_timetables")
+    os.makedirs(timetables_path, exist_ok=True)
     for dep in departments:
         data = []
         for year, year_courses in dep.curriculums.items():
@@ -282,7 +285,8 @@ def department_exam_schedule(departments, courses, rooms, horizon, n_days, solve
                 })
         dep_df = pd.DataFrame(data)
         excel_name = dep.name + ".xlsx"
-        dep_df.to_excel(excel_name, index=False)
+        doc_path = os.path.join(timetables_path, excel_name)
+        dep_df.to_excel(doc_path, index=False)
 
 
 def plot_exam_per_day(exams_per_day, num_days):
@@ -367,7 +371,7 @@ def mission_report(solver, start_vars, slots_per_day, in_room_vars, num_days):
     plot_dep_year_exam_counts(dep_year_per_day, num_days)
 
 
-def exam_scheduling_main():
+def exam_scheduling_main(experiment_no: int):
     # ---------------------------
     # 0) Parameters & Data Loading
     # ---------------------------
@@ -563,15 +567,18 @@ def exam_scheduling_main():
     # ---------------------------
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = 600
-    solver.parameters.num_search_workers = 16
+    solver.parameters.num_search_workers = 12
     solver.parameters.log_search_progress = True
 
     status = solver.Solve(model)
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        print("Solution status:", "OPTIMAL" if status == cp_model.OPTIMAL else "FEASIBLE")
+        run_result = "OPTIMAL" if status == cp_model.OPTIMAL else "FEASIBLE"
+        print("Solution status:", run_result)
         # Build the Excel‐output timetable
+        exp_path = os.path.join(runs_path, "exp" + str(experiment))
+        os.makedirs(exp_path, exist_ok=True)
         build_timetable2(Course.course_list, Room.room_list, horizon, num_days,
-                         solver, start, in_room, seat)
+                         solver, start, in_room, seat, exp_path)
         
         department_exam_schedule(Department.departments,
                                  Course.course_list,
@@ -580,18 +587,21 @@ def exam_scheduling_main():
                                  num_days,
                                  solver,
                                  start,
-                                 in_room)
+                                 in_room,
+                                 exp_path)
         # Print and plot mission report
         mission_report(solver, start, slots_per_day, in_room, num_days)
+        excelify(Department.departments, exp_path)
     else:
         print("No solution found (status {}).".format(status))
 
 
-def excelify(dep_list: list, output_filename="exam_schedule.xlsx"):
+def excelify(dep_list: list, exp_path, output_filename="exam_schedule.xlsx"):
     import pandas as pd
 
     # Read the combined timetable DataFrame from the Excel file.
-    combined_df = pd.read_excel(output_filename)
+    schedule_path = os.path.join(exp_path, output_filename)
+    combined_df = pd.read_excel(schedule_path)
 
     # Ensure "Day" is the first column.
     cols = combined_df.columns.tolist()
@@ -601,7 +611,8 @@ def excelify(dep_list: list, output_filename="exam_schedule.xlsx"):
         combined_df = combined_df[cols]
 
     # Write the DataFrame to Excel using XlsxWriter.
-    writer = pd.ExcelWriter("EDITED2_" + output_filename, engine="xlsxwriter")
+    beautified_path = os.path.join(exp_path, "beautified_" + output_filename)
+    writer = pd.ExcelWriter(beautified_path, engine="xlsxwriter")
     combined_df.to_excel(writer, index=False, sheet_name="Schedule")
 
     workbook = writer.book
@@ -741,8 +752,12 @@ def excelify(dep_list: list, output_filename="exam_schedule.xlsx"):
 
 
 if __name__ == "__main__":
+    runs_path = "./runs"
+    os.makedirs(runs_path, exist_ok=True)
+    experiment = len(os.listdir(runs_path))
+    
     seed = None
     np.random.seed(seed)
     random.seed(seed)
-    exam_scheduling_main()
-    excelify(Department.departments)
+    exam_scheduling_main(experiment)
+    
