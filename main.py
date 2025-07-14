@@ -148,14 +148,15 @@ class Room:
     ids: np.ndarray
     capacities: np.ndarray
 
-    def __init__(self, id: int, room_code: str, capacity: int, c_type: str):
+    def __init__(self, id: int, room_code: str, capacity: int, c_type: str, off_times: list[int] = None):
         self.id = int(id)
         self.capacity = int(capacity)
         self.room_code = room_code
         self.is_lab = (c_type == "Lab")
+        self.off_times = off_times
 
     @staticmethod
-    def read_classroom_data(path: str):
+    def read_classroom_data(path: str, num_days: int, slots_per_day: int, is_midterm: bool):
         df = pd.read_excel(path)
         df = df[df["Room"].notna()][["Room", "Capacity", "Type"]]
 
@@ -165,13 +166,20 @@ class Room:
 
         labs = []
         regulars = []
+        if is_midterm:
+            off_timetable = midterm_timetable(num_days, slots_per_day)
+
         for i, row in enumerate(df.values):
             room_code, capacity, c_type = row
             room_ids.append(i)
             room_caps.append(int(capacity))
             room_codes.append(room_code)
 
-            room_obj = Room(i, room_code, int(capacity), c_type)
+            if is_midterm:
+                room_obj = Room(i, room_code, int(capacity), c_type, off_timetable[room_code])
+            else:
+                room_obj = Room(i, room_code, int(capacity), c_type, None)
+
             if room_obj.is_lab:
                 labs.append(room_obj)
             else:
@@ -372,22 +380,26 @@ def mission_report(solver, start_vars, slots_per_day, in_room_vars, num_days):
     plot_dep_year_exam_counts(dep_year_per_day, num_days)
 
 
-def exam_scheduling_main(experiment_no: int):
+def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day: int):
     # ---------------------------
     # 0) Parameters & Data Loading
     # ---------------------------
-    num_days = 8
-    slots_per_day = 9
+    # TODO!: Fix exam start times
+    # TODO: There should be no exam starting in a room while there is an active exam going on
+    # within active time slot chunk
+
+    # 
 
     course_xlsx = "./data/BerkData2.xlsx"
     room_xlsx = "./data/New Microsoft Excel Worksheet.xlsx"
 
     Course.read_courses(course_xlsx)
-    Room.read_classroom_data(room_xlsx)
+    Room.read_classroom_data(room_xlsx, num_days, slots_per_day, is_midterm)
 
     # Off-time per day (e.g. lunch slot = 4)
     off_by_day = [[4] for _ in range(num_days)]
     off_by_day[4] = off_by_day[4] + [5]  # Day 5 has two off slots
+    off_by_day[9] = off_by_day[9] + [5]
 
     TimeSlot.generate_week(num_days, slots_per_day, off_by_day)
     horizon = num_days * slots_per_day
@@ -401,12 +413,27 @@ def exam_scheduling_main(experiment_no: int):
     start = {}
     end = {}
     interval = {}
-    for e in Course.course_list:
-        dur = e.get_duration()
-        start[e.id] = model.NewIntVar(0, horizon - dur, f"start_e{e.id}")
-        end[e.id] = model.NewIntVar(0, horizon, f"end_e{e.id}")
-        model.Add(end[e.id] == start[e.id] + dur)
-        interval[e.id] = model.NewIntervalVar(start[e.id], dur, end[e.id], f"interval_e{e.id}")
+    if is_midterm:
+        for e in Course.course_list:
+            dur = e.get_duration()
+            if e.year in {1, 3}:
+                start[e.id] = model.NewIntVar(0, horizon // 2 - dur, f"start_e{e.id}")
+                end[e.id] = model.NewIntVar(0, horizon // 2, f"end_e{e.id}")
+            else:
+                start[e.id] = model.NewIntVar(horizon // 2, horizon - dur, f"start_e{e.id}")
+                end[e.id] = model.NewIntVar(horizon // 2, horizon, f"end_e{e.id}")
+
+            model.Add(end[e.id] == start[e.id] + dur)
+            interval[e.id] = model.NewIntervalVar(start[e.id], dur, end[e.id], f"interval_e{e.id}")
+    else:
+        for e in Course.course_list:
+            # TODO: for midterm, determine first and second weeks
+            # TODO: do something here for midterm
+            dur = e.get_duration()
+            start[e.id] = model.NewIntVar(0, horizon - dur, f"start_e{e.id}")
+            end[e.id] = model.NewIntVar(0, horizon, f"end_e{e.id}")
+            model.Add(end[e.id] == start[e.id] + dur)
+            interval[e.id] = model.NewIntervalVar(start[e.id], dur, end[e.id], f"interval_e{e.id}")
 
     # (2) Seat & in_room variables
     seat = {}
@@ -440,7 +467,7 @@ def exam_scheduling_main(experiment_no: int):
         cap = r.capacity if r.is_lab else r.capacity // 2
         model.AddCumulative(intervals=opt_int_per_room[r.id], demands=demands, capacity=cap)
 
-        # Also enforce a “no more than 3 simultaneous exams” hard cap per room:
+        # Also enforce a "no more than 3 simultaneous exams" hard cap per room:
         model.AddCumulative(intervals=opt_int_per_room[r.id],
                             demands=[1] * len(Course.course_list),
                             capacity=3)
@@ -466,7 +493,7 @@ def exam_scheduling_main(experiment_no: int):
                 if r.is_lab:
                     model.Add(seat[(e.id, r.id)] == 0)
 
-    # (7) Link “in_room ⇒ seat ≥ 1”
+    # (7) Link "in_room ⇒ seat ≥ 1"
     for e in Course.course_list:
         for r in Room.room_list:
             model.Add(seat[(e.id, r.id)] >= 1).OnlyEnforceIf(in_room[(e.id, r.id)])
@@ -497,10 +524,26 @@ def exam_scheduling_main(experiment_no: int):
     # (10) Balanced exam-per-department constraints
     # spread out each department-year’s exams roughly evenly across the 8 days
     local_day = {}
-    week_len = num_days
-    for e in Course.course_list:
-        local_day[e.id] = model.NewIntVar(0, week_len - 1, f"local_day_e{e.id}")
-        model.AddDivisionEquality(local_day[e.id], start[e.id], slots_per_day)
+    # TODO: change the week_len to num_days == 5 for midterm
+    # TODO!: this constraint will have issues for midterm scheduling, use with
+    # because of 16 exam of department MM?
+    if is_midterm:
+        week_len = num_days // 2
+        for e in Course.course_list:
+            local_day[e.id] = model.NewIntVar(0, week_len - 1, f"local_day_e{e.id}")
+            if e.year in {1, 3}:
+                model.AddDivisionEquality(local_day[e.id], start[e.id], slots_per_day)
+            else:
+                dur = e.get_duration()
+                shifted_start = model.NewIntVar(0, horizon - slots_per_day * week_len - dur,
+                                                f"shifted_start_{e.id}")
+                model.Add(shifted_start == start[e.id] - slots_per_day * week_len)
+                model.AddDivisionEquality(local_day[e.id], shifted_start, slots_per_day)
+    else:
+        week_len = num_days
+        for e in Course.course_list:
+            local_day[e.id] = model.NewIntVar(0, week_len - 1, f"local_day_e{e.id}")
+            model.AddDivisionEquality(local_day[e.id], start[e.id], slots_per_day)
 
     count_vars = {}
     for dep in Department.departments:
@@ -527,7 +570,7 @@ def exam_scheduling_main(experiment_no: int):
                 model.Add(count_vars[(dep.id, year, d)] >= low)
                 model.Add(count_vars[(dep.id, year, d)] <= high)
 
-    # (11) “Mission active” helper → minimize how many room‐times are actually used
+    # (11) "Mission active" helper -> minimize how many room‐times are actually used
     # (Optional: we include it in the final objective)
     mission_active = {}
     for r in Room.room_list:
@@ -538,11 +581,11 @@ def exam_scheduling_main(experiment_no: int):
                 b_start = model.NewBoolVar(f"bstart_e{e.id}_before_{t.id}")
                 b_end = model.NewBoolVar(f"bend_e{e.id}_after_{t.id}")
 
-                # b_start ⇔ (start[e] <= t.id)
+                # b_start <=> (start[e] <= t.id)
                 model.Add(start[e.id] <= t.id).OnlyEnforceIf(b_start)
                 model.Add(start[e.id] > t.id).OnlyEnforceIf(b_start.Not())
 
-                # b_end ⇔ (end[e] > t.id)
+                # b_end <=> (end[e] > t.id)
                 model.Add(end[e.id] > t.id).OnlyEnforceIf(b_end)
                 model.Add(end[e.id] <= t.id).OnlyEnforceIf(b_end.Not())
 
@@ -752,29 +795,46 @@ def excelify(dep_list: list, exp_path, output_filename="exam_schedule.xlsx"):
     print(f"Total mission count: {total_mission}")
 
 
-
-
-def find_black_cells(file_path, sheet_name):
+def find_black_cells(file_path, sheet_name, slots_per_day, week_offset, off_timetable):
     # Load the workbook and select the worksheet
     wb = load_workbook(file_path)
     ws = wb[sheet_name]
-    close_to_black_cells = []
 
-    for row in ws.iter_rows():
-        for cell in row:
+    for i, col in enumerate(ws.iter_cols()):
+        room_code = ""
+        for j, cell in enumerate(col):
             cell_color = cell.fill.start_color.index
 
+            if j == 0:
+                room_code = cell.value.split('\n')[0]
+                if room_code not in off_timetable.keys():
+                    off_timetable[room_code] = []
+                    continue
+
             if cell_color == 1:
-                close_to_black_cells.append((cell.coordinate, cell.value))
+                time = j - 1
+                ts = time - (time // slots_per_day) + week_offset
+                off_timetable[room_code].append(ts)
 
-    return close_to_black_cells
+    return off_timetable
 
 
-def midterm_timetable():
+def midterm_timetable(slots_per_day: int = 9, num_days: int = 10):
     midterm_tb_path = "./data/bahar_midterm.xlsx"
-    week_1 = find_black_cells(midterm_tb_path, 'first')
-    week_2 = find_black_cells(midterm_tb_path, 'second')
-    
+    horizon = slots_per_day * num_days
+    off_timetable = {}
+    off_timetable = find_black_cells(midterm_tb_path,
+                                     'first',
+                                     slots_per_day,
+                                     0,
+                                     off_timetable)
+    off_timetable = find_black_cells(midterm_tb_path,
+                                     'second',
+                                     slots_per_day,
+                                     horizon // 2,
+                                     off_timetable)
+    return off_timetable
+
 
 if __name__ == "__main__":
     runs_path = "./runs"
@@ -784,5 +844,9 @@ if __name__ == "__main__":
     seed = None
     np.random.seed(seed)
     random.seed(seed)
-    #exam_scheduling_main(experiment)
-    midterm_timetable()
+
+    is_midterm = True
+    num_days = 10
+    slots_per_day = 9
+    exam_scheduling_main(experiment, is_midterm, num_days, slots_per_day)
+    #midterm_timetable()
