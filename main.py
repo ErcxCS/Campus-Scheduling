@@ -4,6 +4,7 @@ import random
 from ortools.sat.python import cp_model
 from matplotlib import pyplot as plt
 import os
+from openpyxl import load_workbook
 
 
 class Department:
@@ -39,6 +40,7 @@ class Department:
 class Course:
     course_list = []
     course_codes = set()
+    _by_code_and_inst = dict()
 
     def __init__(
         self,
@@ -87,31 +89,30 @@ class Course:
             ) = row
 
             dep = Department.get_department(department_name)
-            # If a course with the same code and instructor already exists, just add the new department
-            if course_code in Course.course_codes:
-                existing = next(
-                    (c for c in Course.course_list if c.course_code == course_code), None
-                )
-                if existing is not None and existing.instructor_id == instructor_id:
-                    existing.departments.append(dep)
-                    existing.n_students += int(n_students)
-                    dep.add_course(existing)
-                    continue
+            inst_id = int(instructor_id)
+            key = (course_code, inst_id)
 
-            new_course = Course(
-                id=i,
-                department=dep,
-                course_name=course_name,
-                year=int(year),
-                n_students=int(n_students),
-                course_code=course_code,
-                instructor_id=int(instructor_id),
-                requires_lab=(requires_lab == 1),
-                mandatory=mandatory
-            )
-            dep.add_course(new_course)
-            Course.course_codes.add(course_code)
-            Course.course_list.append(new_course)
+            if key in Course._by_code_and_inst:
+                existing = Course._by_code_and_inst[key]
+                existing.departments.append(dep)
+                existing.n_students += int(n_students)
+                dep.add_course(existing)
+            else:
+                new_course = Course(
+                    id=i,
+                    department=dep,
+                    course_name=course_name,
+                    year=int(year),
+                    n_students=int(n_students),
+                    course_code=course_code,
+                    instructor_id=inst_id,
+                    requires_lab=(requires_lab == 1),
+                    mandatory=mandatory
+                )
+                dep.add_course(new_course)
+                Course.course_codes.add(course_code)
+                Course._by_code_and_inst[key] = new_course
+                Course.course_list.append(new_course)
 
 
 class TimeSlot:
@@ -258,7 +259,7 @@ def build_timetable2(courses, rooms, horizon, n_days, solver, start_vars, in_roo
 def department_exam_schedule(departments, courses, rooms, horizon, n_days, solver, start_vars, in_room_vars, exp_path):
     day_length = horizon // n_days
     import datetime
-    timetables_path = os.path.join(exp_path, "department_timetables")
+    timetables_path = os.path.join(exp_path, "department_schedules")
     os.makedirs(timetables_path, exist_ok=True)
     for dep in departments:
         data = []
@@ -751,13 +752,37 @@ def excelify(dep_list: list, exp_path, output_filename="exam_schedule.xlsx"):
     print(f"Total mission count: {total_mission}")
 
 
+
+
+def find_black_cells(file_path, sheet_name):
+    # Load the workbook and select the worksheet
+    wb = load_workbook(file_path)
+    ws = wb[sheet_name]
+    close_to_black_cells = []
+
+    for row in ws.iter_rows():
+        for cell in row:
+            cell_color = cell.fill.start_color.index
+
+            if cell_color == 1:
+                close_to_black_cells.append((cell.coordinate, cell.value))
+
+    return close_to_black_cells
+
+
+def midterm_timetable():
+    midterm_tb_path = "./data/bahar_midterm.xlsx"
+    week_1 = find_black_cells(midterm_tb_path, 'first')
+    week_2 = find_black_cells(midterm_tb_path, 'second')
+    
+
 if __name__ == "__main__":
     runs_path = "./runs"
     os.makedirs(runs_path, exist_ok=True)
     experiment = len(os.listdir(runs_path))
-    
+
     seed = None
     np.random.seed(seed)
     random.seed(seed)
-    exam_scheduling_main(experiment)
-    
+    #exam_scheduling_main(experiment)
+    midterm_timetable()
