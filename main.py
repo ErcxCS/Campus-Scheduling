@@ -5,6 +5,7 @@ from ortools.sat.python import cp_model
 from matplotlib import pyplot as plt
 import os
 from openpyxl import load_workbook
+from openpyxl.styles import PatternFill
 
 
 class Department:
@@ -147,6 +148,7 @@ class Room:
     room_list: list = []
     ids: np.ndarray
     capacities: np.ndarray
+    off_times_dict: dict = None
 
     def __init__(self, id: int, room_code: str, capacity: int, c_type: str, off_times: list[int] = None):
         self.id = int(id)
@@ -168,6 +170,7 @@ class Room:
         regulars = []
         if is_midterm:
             off_timetable = midterm_timetable(num_days, slots_per_day)
+            Room.off_times_dict = off_timetable
 
         for i, row in enumerate(df.values):
             room_code, capacity, c_type = row
@@ -388,8 +391,6 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, sl
     # TODO: There should be no exam starting in a room while there is an active exam going on
     # within active time slot chunk
 
-    # 
-
     course_xlsx = "./data/BerkData2.xlsx"
     room_xlsx = "./data/New Microsoft Excel Worksheet.xlsx"
 
@@ -399,7 +400,10 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, sl
     # Off-time per day (e.g. lunch slot = 4)
     off_by_day = [[4] for _ in range(num_days)]
     off_by_day[4] = off_by_day[4] + [5]  # Day 5 has two off slots
-    off_by_day[9] = off_by_day[9] + [5]
+    if num_days >= 10:
+        off_by_day[9] = off_by_day[9] + [5]
+
+    off_by_day[3] = off_by_day[3] + [5, 6]  # simulations of 5i exams
 
     TimeSlot.generate_week(num_days, slots_per_day, off_by_day)
     horizon = num_days * slots_per_day
@@ -427,8 +431,6 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, sl
             interval[e.id] = model.NewIntervalVar(start[e.id], dur, end[e.id], f"interval_e{e.id}")
     else:
         for e in Course.course_list:
-            # TODO: for midterm, determine first and second weeks
-            # TODO: do something here for midterm
             dur = e.get_duration()
             start[e.id] = model.NewIntVar(0, horizon - dur, f"start_e{e.id}")
             end[e.id] = model.NewIntVar(0, horizon, f"end_e{e.id}")
@@ -471,6 +473,37 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, sl
         model.AddCumulative(intervals=opt_int_per_room[r.id],
                             demands=[1] * len(Course.course_list),
                             capacity=3)
+
+    # (X) Exams in the same room that overlap must start at the same time
+    """ for r in Room.room_list:
+        for i in range(len(Course.course_list)):
+            for j in range(i+1, len(Course.course_list)):
+                e = Course.course_list[i]
+                f = Course.course_list[j]
+                dur_e = e.get_duration()
+                dur_f = f.get_duration()
+
+                # 1) b1: e finishes ≤ f starts
+                b1 = model.NewBoolVar(f"e{e.id}_before_f{f.id}")
+                model.Add(start[e.id] + dur_e <= start[f.id]).OnlyEnforceIf(b1)
+                model.Add(start[e.id] + dur_e > start[f.id]).OnlyEnforceIf(b1.Not())
+
+                # 2) b2: f finishes ≤ e starts
+                b2 = model.NewBoolVar(f"f{f.id}_before_e{e.id}")
+                model.Add(start[f.id] + dur_f <= start[e.id]).OnlyEnforceIf(b2)
+                model.Add(start[f.id] + dur_f > start[e.id]).OnlyEnforceIf(b2.Not())
+
+                # 3) overlap ⇔ not (e before f or f before e)
+                overlap = model.NewBoolVar(f"overlap_e{e.id}_f{f.id}_r{r.id}")
+                model.AddBoolAnd([b1.Not(), b2.Not()]).OnlyEnforceIf(overlap)
+                model.AddBoolOr([b1, b2]).OnlyEnforceIf(overlap.Not())
+
+                # 4) if both in room r AND they overlap, force same start
+                model.Add(start[e.id] == start[f.id]).OnlyEnforceIf([
+                    in_room[(e.id, r.id)],
+                    in_room[(f.id, r.id)],
+                    overlap
+                ]) """
 
     # (5) Dept/Year no-overlap
     dept_year_intervals = {}
@@ -575,29 +608,38 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, sl
     mission_active = {}
     for r in Room.room_list:
         for t in TimeSlot.slot_list:
-            mission_active[(r.id, t.id)] = model.NewBoolVar(f"mission_active_r{r.id}_t{t.id}")
+            var = model.NewBoolVar(f"mission_active_r{r.id}_t{t.id}")
+            mission_active[(r.id, t.id)] = var
+
+            if r.off_times and t.id in r.off_times:
+                model.Add(var == 0)
+
             active_list = []
             for e in Course.course_list:
-                b_start = model.NewBoolVar(f"bstart_e{e.id}_before_{t.id}")
-                b_end = model.NewBoolVar(f"bend_e{e.id}_after_{t.id}")
+                b_start = model.NewBoolVar(f"bstart_e{e.id}_{r.id}_before_{t.id}")
+                b_end = model.NewBoolVar(f"bend_e{e.id}_{r.id}_after_{t.id}")
 
-                # b_start <=> (start[e] <= t.id)
                 model.Add(start[e.id] <= t.id).OnlyEnforceIf(b_start)
                 model.Add(start[e.id] > t.id).OnlyEnforceIf(b_start.Not())
 
-                # b_end <=> (end[e] > t.id)
                 model.Add(end[e.id] > t.id).OnlyEnforceIf(b_end)
                 model.Add(end[e.id] <= t.id).OnlyEnforceIf(b_end.Not())
 
-                active_bool = model.NewBoolVar(f"active_e{e.id}_r{r.id}_t{t.id}")
-                model.AddBoolAnd([b_start, b_end, in_room[(e.id, r.id)]]).OnlyEnforceIf(active_bool)
-                model.AddBoolOr([b_start.Not(), b_end.Not(), in_room[(e.id, r.id)].Not()]) \
-                     .OnlyEnforceIf(active_bool.Not())
-                active_list.append(active_bool)
+                active = model.NewBoolVar(f"active_e{e.id}_r{r.id}_t{t.id}")
+                model.AddBoolAnd([in_room[(e.id, r.id)], b_start, b_end]) \
+                    .OnlyEnforceIf(active)
+                model.AddBoolOr([
+                    in_room[(e.id, r.id)].Not(),
+                    b_start.Not(),
+                    b_end.Not()
+                ]).OnlyEnforceIf(active.Not())
 
-            model.AddMaxEquality(mission_active[(r.id, t.id)], active_list)
+                active_list.append(active)
+
+            model.AddMaxEquality(var, active_list)
 
     total_missions = sum(mission_active.values())
+
 
     # (12) Final objective: minimize (# of rooms used) + 2 × (room‐times actually used)
     room_usage = []
@@ -613,6 +655,8 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, sl
     solver.parameters.max_time_in_seconds = 600
     solver.parameters.num_search_workers = 12
     solver.parameters.log_search_progress = True
+    print(f"symmetry: {solver.parameters.symmetry_level}")
+    solver.parameters.symmetry_level = 3
 
     status = solver.Solve(model)
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -635,12 +679,12 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, sl
                                  exp_path)
         # Print and plot mission report
         mission_report(solver, start, slots_per_day, in_room, num_days)
-        excelify(Department.departments, exp_path)
+        excelify(Department.departments, exp_path, Room.room_list, output_filename="exam_schedule.xlsx")
     else:
         print("No solution found (status {}).".format(status))
 
 
-def excelify(dep_list: list, exp_path, output_filename="exam_schedule.xlsx"):
+def excelify(dep_list: list, exp_path, room_list, output_filename="exam_schedule.xlsx"):
     import pandas as pd
 
     # Read the combined timetable DataFrame from the Excel file.
@@ -783,6 +827,7 @@ def excelify(dep_list: list, exp_path, output_filename="exam_schedule.xlsx"):
                 row += 1
 
     writer._save()
+    color_offtimes_black(beautified_path)
 
     # Print out the total number of colored cells for each department.
     print("Colored cells count by department:")
@@ -836,6 +881,38 @@ def midterm_timetable(slots_per_day: int = 9, num_days: int = 10):
     return off_timetable
 
 
+def color_offtimes_black(xlsx_path: str):
+    if Room.off_times_dict is None:
+        return
+
+    wb = load_workbook(xlsx_path)
+    ws = wb["Schedule"]
+
+    black_fill = PatternFill(
+        bgColor="000000",
+        fill_type="solid"
+    )
+
+
+    for i, col in enumerate(ws.iter_cols()):
+        room_code = ""
+        off_list = None
+ 
+        for j, cell in enumerate(col):
+            if cell.value is not None:
+                value = str(cell.value)
+                room_code = value.split('(')[0]
+
+                if room_code in Room.off_times_dict.keys():
+                    off_list = Room.off_times_dict[room_code]
+                    continue
+                
+            if off_list and (j - 1) in off_list:
+                cell.fill = black_fill
+
+    wb.save(xlsx_path)
+
+
 if __name__ == "__main__":
     runs_path = "./runs"
     os.makedirs(runs_path, exist_ok=True)
@@ -849,4 +926,3 @@ if __name__ == "__main__":
     num_days = 10
     slots_per_day = 9
     exam_scheduling_main(experiment, is_midterm, num_days, slots_per_day)
-    #midterm_timetable()
