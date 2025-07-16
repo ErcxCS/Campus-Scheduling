@@ -42,6 +42,7 @@ class Course:
     course_list = []
     course_codes = set()
     _by_code_and_inst = dict()
+    pass_course_midterm  = ["FİZ 176", "GIDA 324", "EEM 370"]
 
     def __init__(
         self,
@@ -75,7 +76,7 @@ class Course:
         return self.blocks[0]
 
     @staticmethod
-    def read_courses(path: str):
+    def read_courses(path: str, is_midterm: bool):
         df = pd.read_excel(path, index_col=None, header=0)
         for i, row in enumerate(df.values):
             (
@@ -88,6 +89,9 @@ class Course:
                 n_students,
                 requires_lab
             ) = row
+
+            if is_midterm and course_code in Course.pass_course_midterm:
+                continue
 
             dep = Department.get_department(department_name)
             inst_id = int(instructor_id)
@@ -394,7 +398,7 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, sl
     course_xlsx = "./data/BerkData2.xlsx"
     room_xlsx = "./data/New Microsoft Excel Worksheet.xlsx"
 
-    Course.read_courses(course_xlsx)
+    Course.read_courses(course_xlsx, is_midterm)
     Room.read_classroom_data(room_xlsx, num_days, slots_per_day, is_midterm)
 
     # Off-time per day (e.g. lunch slot = 4)
@@ -663,7 +667,8 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, sl
         run_result = "OPTIMAL" if status == cp_model.OPTIMAL else "FEASIBLE"
         print("Solution status:", run_result)
         # Build the Excel‐output timetable
-        exp_path = os.path.join(runs_path, "exp" + str(experiment))
+        exam_type = "_midterm" if is_midterm else "_final"
+        exp_path = os.path.join(runs_path, "exp" + str(experiment + exam_type))
         os.makedirs(exp_path, exist_ok=True)
         build_timetable2(Course.course_list, Room.room_list, horizon, num_days,
                          solver, start, in_room, seat, exp_path)
