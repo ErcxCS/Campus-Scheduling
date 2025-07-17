@@ -972,6 +972,35 @@ def color_offtimes_black(xlsx_path: str):
 
     wb.save(xlsx_path)
 
+
+def total_mission_count(df: pd.DataFrame, verbose=0):
+    day_mission_count = {}
+    day_exam_count = {}
+
+    list_day = df["Day"].unique().tolist()
+    for day in list_day:
+        day_df = df[df["Day"] == day]
+        list_slot = day_df["Starting Slot"].unique().tolist()
+        day_mission_count[day] = 0
+        day_exam_count[day] = len(day_df)
+        print(f"{day_df["Departments"].value_counts()}, day{day}")
+        for slot in list_slot:
+            slot_df = day_df[day_df["Starting Slot"] == slot]
+            rooms = slot_df["Assigned Rooms"].values.tolist()
+
+            room_codes = ",".join(rooms)
+            rooms = set(room_codes.split(","))
+            unique_room_count = len(rooms)
+            if verbose == 1:
+                print(f"Day: {day} - Slot: {slot} - Rooms: {rooms}")
+                print(f"unique rooms: {rooms}, count: {unique_room_count}")
+
+            day_mission_count[day] += unique_room_count
+    day_mission_count = dict(sorted(day_mission_count.items()))
+    mission_count = sum(day_mission_count.values())
+    return mission_count, day_mission_count
+
+
 def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day: int):
     course_xlsx = "./data/BerkData2.xlsx"
     room_xlsx = "./data/New Microsoft Excel Worksheet.xlsx"
@@ -998,16 +1027,21 @@ def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day:
     schedules_folder = "department_schedules"
     schedules_path = os.path.join(exp_path, schedules_folder)
     department_schedules = os.listdir(schedules_path)
-    dfs: dict[str: pd.DataFrame] = {}
+    department_dfs: dict[str: pd.DataFrame] = {}
     for dep in department_schedules:
         dep_word = dep.split(" ")
         dep_code = dep_word[0][0] + dep_word[1][0]
         xlsx_path = os.path.join(schedules_path, dep)
         df = pd.read_excel(xlsx_path, index_col=None, header=0)
-        dfs[dep_code] = df
+        department_dfs[dep_code] = df
 
-    for course in Course.course_list:
-        print(course.get_dep_shorts(), "---", course.course_code)
+    faculty_xlsx = "faculty_schedule.xlsx"
+    faculty_path = os.path.join(exp_path, faculty_xlsx)
+    faculty_df = pd.read_excel(faculty_path, index_col=None, header=0)
+    
+    mission_count, day_mission_count = total_mission_count(faculty_df)
+    exam_count = len(faculty_df)
+    print(f"TMC: {mission_count}, EC: {exam_count}, DMC: {day_mission_count}")
 
 
 
@@ -1024,5 +1058,5 @@ if __name__ == "__main__":
     is_midterm = False
     num_days = 8
     slots_per_day = 9
-    exam_scheduling_main(experiment, is_midterm, num_days, slots_per_day)
-    #analysis(experiment - 1, is_midterm, num_days, slots_per_day)
+    # exam_scheduling_main(experiment, is_midterm, num_days, slots_per_day)
+    analysis(experiment - 1, is_midterm, num_days, slots_per_day)
