@@ -69,11 +69,13 @@ class Course:
         self.dep_short = ' '.join(dep.short for dep in self.departments)
 
         # Each course is assumed to have exactly one block of duration 2
-        # (This mirrors the old `get_blocks()` logic, which always returned [2].)
         self.blocks = [2]
 
     def get_duration(self):
         return self.blocks[0]
+    
+    def get_dep_shorts(self):
+        return ' '.join(dep.short for dep in self.departments)
 
     @staticmethod
     def read_courses(path: str, is_midterm: bool):
@@ -289,20 +291,62 @@ def department_exam_schedule(departments, courses, rooms, horizon, n_days, solve
                 assigned_rooms = ""
                 for r in rooms:
                     if solver.Value(in_room_vars[(course.id, r.id)]) == 1:
-                        assigned_rooms += r.room_code + " - "
-
+                        assigned_rooms += r.room_code + ","
+                assigned_rooms = assigned_rooms[:-1]
                 data.append({
                     'Year:': year,
                     'Course ID': course.course_code,
-                    'Course Name': course.course_name,
-                    'Date': day_str,
-                    'Starting Hours': date_time,
+                    # 'Course Name': course.course_name,
+                    'Day': nth_day,
+                    'Starting Slot': start_time,
                     'Rooms': assigned_rooms
                 })
         dep_df = pd.DataFrame(data)
         excel_name = dep.name + ".xlsx"
         doc_path = os.path.join(timetables_path, excel_name)
         dep_df.to_excel(doc_path, index=False)
+
+
+def faculty_exam_schedule(courses, rooms, horizon, n_days, solver, start_vars, in_room_vars, exp_path):
+    day_length = horizon // n_days
+    import datetime
+    data = []
+    for course in courses:
+        start_var = solver.Value(start_vars[course.id])
+        nth_day = start_var // day_length + 1
+        start_time = start_var % day_length
+        date_time = datetime.time(start_time + 8, 30).strftime("%H:%M")
+        day_str = f"day - {nth_day}"
+
+        assigned_rooms = ""
+        total_room_cap = 0
+        for r in rooms:
+            if solver.Value(in_room_vars[(course.id, r.id)]) == 1:
+                assigned_rooms += r.room_code + ","
+                total_room_cap += r.capacity if r.is_lab else r.capacity // 2
+
+        assigned_rooms = assigned_rooms[:-1]
+        num_rooms_used = len(assigned_rooms.split(","))
+
+        deps = course.get_dep_shorts()
+        deps = deps.split(" ")
+        deps = ",".join(deps)
+        data.append({
+            'Departments': deps,
+            'Year:': course.year,
+            'Course ID': course.course_code,
+            # 'Course Name': course.course_name,
+            'Day': nth_day,
+            'Starting Slot': start_time,
+            'Assigned Rooms': assigned_rooms,
+            'Num Rooms Used': num_rooms_used,
+            'Total Room Cap': total_room_cap,
+            "Num Students": course.n_students
+        })
+    fac_df = pd.DataFrame(data)
+    excel_name = "faculty_schedule" + ".xlsx"
+    doc_path = os.path.join(exp_path, excel_name)
+    fac_df.to_excel(doc_path, index=False)
 
 
 def plot_exam_per_day(exams_per_day, num_days):
@@ -668,11 +712,11 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, sl
         print("Solution status:", run_result)
         # Build the Excel‐output timetable
         exam_type = "_midterm" if is_midterm else "_final"
-        exp_path = os.path.join(runs_path, "exp" + str(experiment + exam_type))
+        exp_path = os.path.join(runs_path, "exp" + str(experiment) + exam_type)
         os.makedirs(exp_path, exist_ok=True)
         build_timetable2(Course.course_list, Room.room_list, horizon, num_days,
                          solver, start, in_room, seat, exp_path)
-        
+
         department_exam_schedule(Department.departments,
                                  Course.course_list,
                                  Room.room_list,
@@ -682,6 +726,17 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, sl
                                  start,
                                  in_room,
                                  exp_path)
+
+        faculty_exam_schedule(
+            Course.course_list,
+            Room.room_list,
+            horizon,
+            num_days,
+            solver,
+            start,
+            in_room,
+            exp_path
+        )
         # Print and plot mission report
         mission_report(solver, start, slots_per_day, in_room, num_days)
         excelify(Department.departments, exp_path, Room.room_list, output_filename="exam_schedule.xlsx")
@@ -917,6 +972,45 @@ def color_offtimes_black(xlsx_path: str):
 
     wb.save(xlsx_path)
 
+def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day: int):
+    course_xlsx = "./data/BerkData2.xlsx"
+    room_xlsx = "./data/New Microsoft Excel Worksheet.xlsx"
+
+    Course.read_courses(course_xlsx, is_midterm)
+    Room.read_classroom_data(room_xlsx, num_days, slots_per_day, is_midterm)
+
+    # Off-time per day (e.g. lunch slot = 4)
+    off_by_day = [[4] for _ in range(num_days)]
+    off_by_day[4] = off_by_day[4] + [5]  # Day 5 has two off slots
+    if num_days >= 10:
+        off_by_day[9] = off_by_day[9] + [5]
+
+    off_by_day[3] = off_by_day[3] + [5, 6]  # simulations of 5i exams
+
+    TimeSlot.generate_week(num_days, slots_per_day, off_by_day)
+    horizon = num_days * slots_per_day
+
+    runs_path = "./runs"
+    runs = os.listdir(runs_path)
+    run = [r for r in runs if "exp" + str(experiment_no) in r]
+    run = run[0]
+    exp_path = os.path.join(runs_path, run)
+    schedules_folder = "department_schedules"
+    schedules_path = os.path.join(exp_path, schedules_folder)
+    department_schedules = os.listdir(schedules_path)
+    dfs: dict[str: pd.DataFrame] = {}
+    for dep in department_schedules:
+        dep_word = dep.split(" ")
+        dep_code = dep_word[0][0] + dep_word[1][0]
+        xlsx_path = os.path.join(schedules_path, dep)
+        df = pd.read_excel(xlsx_path, index_col=None, header=0)
+        dfs[dep_code] = df
+
+    for course in Course.course_list:
+        print(course.get_dep_shorts(), "---", course.course_code)
+
+
+
 
 if __name__ == "__main__":
     runs_path = "./runs"
@@ -927,7 +1021,8 @@ if __name__ == "__main__":
     np.random.seed(seed)
     random.seed(seed)
 
-    is_midterm = True
-    num_days = 10
+    is_midterm = False
+    num_days = 8
     slots_per_day = 9
     exam_scheduling_main(experiment, is_midterm, num_days, slots_per_day)
+    #analysis(experiment - 1, is_midterm, num_days, slots_per_day)
