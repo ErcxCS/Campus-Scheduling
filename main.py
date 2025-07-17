@@ -30,6 +30,19 @@ class Department:
             self.courses.append(course)
             self.curriculums.setdefault(course.year, []).append(course)
 
+    def get_course(self, course_code: str):
+        for course in self.courses:
+            if course_code == course.course_code:
+                return course
+        return None
+
+    @classmethod
+    def get_dep(cls, dep_short: str):
+        for dep in Department.departments:
+            if dep_short == dep.short:
+                return dep
+        return None
+
     @classmethod
     def get_department(cls, department_name: str):
         if department_name in cls.department_names:
@@ -42,7 +55,7 @@ class Course:
     course_list = []
     course_codes = set()
     _by_code_and_inst = dict()
-    pass_course_midterm  = ["FİZ 176", "GIDA 324", "EEM 370"]
+    pass_course_midterm = ["FİZ 176", "GIDA 324", "EEM 370"]
 
     def __init__(
         self,
@@ -70,7 +83,7 @@ class Course:
 
         # Each course is assumed to have exactly one block of duration 2
         self.blocks = [2]
-
+        
     def get_duration(self):
         return self.blocks[0]
     
@@ -953,7 +966,6 @@ def color_offtimes_black(xlsx_path: str):
         fill_type="solid"
     )
 
-
     for i, col in enumerate(ws.iter_cols()):
         room_code = ""
         off_list = None
@@ -983,7 +995,7 @@ def total_mission_count(df: pd.DataFrame, verbose=0):
         list_slot = day_df["Starting Slot"].unique().tolist()
         day_mission_count[day] = 0
         day_exam_count[day] = len(day_df)
-        print(f"{day_df["Departments"].value_counts()}, day{day}")
+        # print(f"{day_df['Departments'].value_counts()}, day{day}")
         for slot in list_slot:
             slot_df = day_df[day_df["Starting Slot"] == slot]
             rooms = slot_df["Assigned Rooms"].values.tolist()
@@ -999,6 +1011,60 @@ def total_mission_count(df: pd.DataFrame, verbose=0):
     day_mission_count = dict(sorted(day_mission_count.items()))
     mission_count = sum(day_mission_count.values())
     return mission_count, day_mission_count
+
+
+def read_dfs(experiment_no: int, exam: str = None):
+    runs_path = "./runs"
+    runs = os.listdir(runs_path)
+    run = [r for r in runs if "exp" + str(experiment_no) in r]
+    run = run[0]
+    exp_path = os.path.join(runs_path, run)
+    schedules_folder = "department_schedules"
+    if exam:
+        schedules_path = "./data/department_schedules_" + exam
+    else:
+        schedules_path = os.path.join(exp_path, schedules_folder)
+    
+    department_schedules = os.listdir(schedules_path)
+    if "modified" in department_schedules:
+        department_schedules.remove("modified")
+    dep_dfs: dict[str: pd.DataFrame] = {}
+    for dep in department_schedules:
+        dep_word = dep.split(" ")
+        dep_code = dep_word[0][0] + dep_word[1][0]
+        xlsx_path = os.path.join(schedules_path, dep)
+        df = pd.read_excel(xlsx_path, index_col=None, header=0)
+        dep_dfs[dep_code] = df
+
+    if exam is None:
+        faculty_xlsx = "faculty_schedule.xlsx"
+        faculty_path = os.path.join(exp_path, faculty_xlsx)
+        fac_df = pd.read_excel(faculty_path, index_col=None, header=0)
+    else:
+        fac_df = None
+
+    return dep_dfs, fac_df
+
+
+def save_to(dep: Department, df: pd.DataFrame, exam: str):
+    dfs_paths = "./data/department_schedules_" + exam
+    modified_dfs = os.path.join(dfs_paths, "modified")
+    os.makedirs(modified_dfs, exist_ok=True)
+    xlsx_path = os.path.join(modified_dfs, dep.name + ".xlsx")
+    df.to_excel(xlsx_path, index=False)
+
+
+def add_info(df: pd.DataFrame, dep: Department):
+    name_list = []
+    course_codes = df["Course ID"].tolist()
+    for course_code in course_codes:
+        try:
+            course = dep.get_course(course_code)
+            name_list.append(course.course_name)
+        except:
+            print(course_code)
+    df["Course Name"] = name_list
+    return df
 
 
 def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day: int):
@@ -1019,31 +1085,11 @@ def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day:
     TimeSlot.generate_week(num_days, slots_per_day, off_by_day)
     horizon = num_days * slots_per_day
 
-    runs_path = "./runs"
-    runs = os.listdir(runs_path)
-    run = [r for r in runs if "exp" + str(experiment_no) in r]
-    run = run[0]
-    exp_path = os.path.join(runs_path, run)
-    schedules_folder = "department_schedules"
-    schedules_path = os.path.join(exp_path, schedules_folder)
-    department_schedules = os.listdir(schedules_path)
-    department_dfs: dict[str: pd.DataFrame] = {}
-    for dep in department_schedules:
-        dep_word = dep.split(" ")
-        dep_code = dep_word[0][0] + dep_word[1][0]
-        xlsx_path = os.path.join(schedules_path, dep)
-        df = pd.read_excel(xlsx_path, index_col=None, header=0)
-        department_dfs[dep_code] = df
+    dep_dfs, fac_df = read_dfs(experiment_no)
 
-    faculty_xlsx = "faculty_schedule.xlsx"
-    faculty_path = os.path.join(exp_path, faculty_xlsx)
-    faculty_df = pd.read_excel(faculty_path, index_col=None, header=0)
-    
-    mission_count, day_mission_count = total_mission_count(faculty_df)
-    exam_count = len(faculty_df)
-    print(f"TMC: {mission_count}, EC: {exam_count}, DMC: {day_mission_count}")
-
-
+    mission_count, day_mission_count = total_mission_count(fac_df)
+    exam_count = len(fac_df)
+    #print(f"TMC: {mission_count}, EC: {exam_count}, DMC: {day_mission_count}")
 
 
 if __name__ == "__main__":
@@ -1055,8 +1101,15 @@ if __name__ == "__main__":
     np.random.seed(seed)
     random.seed(seed)
 
-    is_midterm = False
+    is_midterm = True
     num_days = 8
     slots_per_day = 9
     # exam_scheduling_main(experiment, is_midterm, num_days, slots_per_day)
     analysis(experiment - 1, is_midterm, num_days, slots_per_day)
+
+    folder = "midterms" if is_midterm else "finals"
+    dep_dfs = read_dfs(0, folder)[0]
+    for dep_str, dep_df in dep_dfs.items():
+        dep = Department.get_dep(dep_str)
+        df_mod = add_info(dep_df, dep)
+        save_to(dep, df_mod, folder)
