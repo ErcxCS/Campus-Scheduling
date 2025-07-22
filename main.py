@@ -464,7 +464,7 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, sl
     if num_days >= 10:
         off_by_day[9] = off_by_day[9] + [5]
 
-    off_by_day[3] = off_by_day[3] + [5, 6]  # simulations of 5i exams
+    #off_by_day[3] = off_by_day[3] + [5, 6]  # simulations of 5i exams
 
     TimeSlot.generate_week(num_days, slots_per_day, off_by_day)
     horizon = num_days * slots_per_day
@@ -714,10 +714,10 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, sl
     # ---------------------------
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = 600
-    solver.parameters.num_search_workers = 12
+    solver.parameters.num_search_workers = 16
     solver.parameters.log_search_progress = True
     print(f"symmetry: {solver.parameters.symmetry_level}")
-    solver.parameters.symmetry_level = 3
+    solver.parameters.symmetry_level = 2
 
     status = solver.Solve(model)
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -1089,7 +1089,11 @@ def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day:
 
     mission_count, day_mission_count = total_mission_count(fac_df)
     exam_count = len(fac_df)
-    #print(f"TMC: {mission_count}, EC: {exam_count}, DMC: {day_mission_count}")
+    print(f"TMC: {mission_count}, EC: {exam_count}, DMC: {day_mission_count}")
+
+    manuel_scheduling = 452
+    print(f"manuel scheduling:{manuel_scheduling}")
+    print(f"{mission_count/manuel_scheduling:2f}")
 
 
 if __name__ == "__main__":
@@ -1102,14 +1106,14 @@ if __name__ == "__main__":
     random.seed(seed)
 
     is_midterm = True
-    num_days = 8
+    num_days = 10
     slots_per_day = 9
     # exam_scheduling_main(experiment, is_midterm, num_days, slots_per_day)
     analysis(experiment - 1, is_midterm, num_days, slots_per_day)
 
-    folder = "midterms" if is_midterm else "finals"
+    """ folder = "midterms" if is_midterm else "finals"
     dep_dfs = read_dfs(0, folder)[0]
     for dep_str, dep_df in dep_dfs.items():
         dep = Department.get_dep(dep_str)
         df_mod = add_info(dep_df, dep)
-        save_to(dep, df_mod, folder)
+        save_to(dep, df_mod, folder) """
