@@ -217,6 +217,13 @@ class Room:
             "capacities": room_caps
         })
 
+    @staticmethod
+    def find_by_code(room_code: str):
+        for room in Room.room_list:
+            if room.room_code == room_code:
+                return room
+        raise Exception(f"room not found: {room_code} is not in room_list")
+
 
 def get_off_chunks(slot_list):
     """
@@ -619,7 +626,7 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, sl
     # spread out each department-year’s exams roughly evenly across the 8 days
     local_day = {}
     # TODO: change the week_len to num_days == 5 for midterm
-    # TODO!: this constraint will have issues for midterm scheduling, use with
+    # TODO!: this constraint will have issues for midterm scheduling
     # because of 16 exam of department MM?
     if is_midterm:
         week_len = num_days // 2
@@ -1028,6 +1035,9 @@ def read_dfs(experiment_no: int, exam: str = None):
     department_schedules = os.listdir(schedules_path)
     if "modified" in department_schedules:
         department_schedules.remove("modified")
+    if "faculty_schedule_manuel.xlsx" in department_schedules:
+        department_schedules.remove("faculty_schedule_manuel.xlsx")
+
     dep_dfs: dict[str: pd.DataFrame] = {}
     for dep in department_schedules:
         dep_word = dep.split(" ")
@@ -1036,12 +1046,10 @@ def read_dfs(experiment_no: int, exam: str = None):
         df = pd.read_excel(xlsx_path, index_col=None, header=0)
         dep_dfs[dep_code] = df
 
-    if exam is None:
-        faculty_xlsx = "faculty_schedule.xlsx"
-        faculty_path = os.path.join(exp_path, faculty_xlsx)
-        fac_df = pd.read_excel(faculty_path, index_col=None, header=0)
-    else:
-        fac_df = None
+    
+    faculty_xlsx = "faculty_schedule.xlsx"
+    faculty_path = os.path.join(exp_path, faculty_xlsx)
+    fac_df = pd.read_excel(faculty_path, index_col=None, header=0)
 
     return dep_dfs, fac_df
 
@@ -1067,6 +1075,74 @@ def add_info(df: pd.DataFrame, dep: Department):
     return df
 
 
+def unified_manuel_fac_schedule(dfs: dict[str: pd.DataFrame], course_list: list[Course]):
+    data = []
+    for course in course_list:
+        used_rooms: set[Room] = set()
+        date_info: list[int] = list()
+        for dep in course.departments:
+            dep_df = dfs[dep.short]
+            try:
+                course_entry = dep_df[dep_df["Course ID"] == course.course_code]
+                rooms_used = course_entry["Rooms Used"].values[0]
+            except Exception as e:
+                print(f"Error: unable to read course with course_code {course.course_code} - \n\t {e}")
+                return
+            
+            used_room_codes = rooms_used.split(",")
+            for used_room in used_room_codes:
+                try:
+                    used_rooms.add(Room.find_by_code(used_room.strip()))
+                except Exception as e:
+                    print(f"Error retreiving room with room code: {used_room, dep.short} - \n\t {e}")
+                    return
+
+            date = course_entry["Date"].values[0]
+            date_info.append(date)
+        if len(set(date_info)) != 1:
+            raise Exception("Different date info")
+
+        
+        deps = course.get_dep_shorts()
+        deps = deps.split(" ")
+        deps = ",".join(deps)
+        data.append({
+            'Departments': deps,
+            'Year:': course.year,
+            'Course ID': course.course_code,
+            # 'Course Name': course.course_name,
+            'Day': date,
+            'Assigned Rooms': [room.room_code for room in used_rooms],
+            'Num Rooms Used': len(used_rooms),
+            'Total Room Cap': sum([room.capacity if room.is_lab else room.capacity // 2 for room in used_rooms]),
+            "Num Students": course.n_students
+        })
+    fac_manuel_df = pd.DataFrame(data)
+    return fac_manuel_df
+
+
+def save_manuel_fac(df, exam):
+    df_path = "./data/department_schedules_" + exam
+    fac_xslx_path = os.path.join(df_path, "faculty_schedule_manuel_" + exam + ".xlsx")
+    df.to_excel(fac_xslx_path, index=False)
+
+def read_fac_xlsxs(experiment_no: int, exam: str = None):
+    runs_path = "./runs"
+    runs = os.listdir(runs_path)
+    run = [r for r in runs if "exp" + str(experiment_no) in r]
+    run = run[0]
+    exp_path = os.path.join(runs_path, run)
+    faculty_xlsx = "faculty_schedule.xlsx"
+    faculty_path = os.path.join(exp_path, faculty_xlsx)
+    fac_df_out = pd.read_excel(faculty_path, index_col=None, header=0)
+
+    df_path = "./data/department_schedules_" + exam
+    faculty_path = os.path.join(df_path, "faculty_schedule_manuel_" + exam + ".xlsx")
+    fac_df_manuel = pd.read_excel(faculty_path, index_col=None, header=0)
+    
+    return fac_df_manuel, fac_df_out
+
+
 def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day: int):
     course_xlsx = "./data/BerkData2.xlsx"
     room_xlsx = "./data/New Microsoft Excel Worksheet.xlsx"
@@ -1085,15 +1161,30 @@ def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day:
     TimeSlot.generate_week(num_days, slots_per_day, off_by_day)
     horizon = num_days * slots_per_day
 
-    dep_dfs, fac_df = read_dfs(experiment_no)
+    exam = "midterms" if is_midterm else "finals"
+    fac_df_manuel, fac_df_out = read_fac_xlsxs(experiment_no, exam)
+    print(len(fac_df_manuel), len(fac_df_out))
 
-    mission_count, day_mission_count = total_mission_count(fac_df)
-    exam_count = len(fac_df)
-    print(f"TMC: {mission_count}, EC: {exam_count}, DMC: {day_mission_count}")
+    """ exam = "finals"
+    dep_dfs, fac_df = read_dfs(experiment_no, exam)
+    fac_df_manuel = unified_manuel_fac_schedule(dep_dfs, Course.course_list)
+    print(len(fac_df), len(fac_df_manuel))
+    save_manuel_fac(fac_df_manuel, exam) """
 
-    manuel_scheduling = 452
-    print(f"manuel scheduling:{manuel_scheduling}")
-    print(f"{mission_count/manuel_scheduling:2f}")
+    mission_count, day_mission_count = total_mission_count(fac_df_out)
+    print(f"TMC: {mission_count}, DMC: {day_mission_count}")
+
+    manuel_scheduling_count = fac_df_manuel['Num Rooms Used'].sum()
+    print(f"manuel scheduling:{manuel_scheduling_count}")
+    print(f"{mission_count/manuel_scheduling_count:2f}")
+
+    set1 = set(fac_df_out["Course ID"])
+    set2 = set(fac_df_manuel["Course ID"])
+
+    symmetric_diff = set1.symmetric_difference(set2)
+    print(symmetric_diff)
+
+
 
 
 if __name__ == "__main__":
@@ -1105,15 +1196,9 @@ if __name__ == "__main__":
     np.random.seed(seed)
     random.seed(seed)
 
-    is_midterm = True
-    num_days = 10
+    is_midterm = False
+    num_days = 8
     slots_per_day = 9
     # exam_scheduling_main(experiment, is_midterm, num_days, slots_per_day)
     analysis(experiment - 1, is_midterm, num_days, slots_per_day)
 
-    """ folder = "midterms" if is_midterm else "finals"
-    dep_dfs = read_dfs(0, folder)[0]
-    for dep_str, dep_df in dep_dfs.items():
-        dep = Department.get_dep(dep_str)
-        df_mod = add_info(dep_df, dep)
-        save_to(dep, df_mod, folder) """
