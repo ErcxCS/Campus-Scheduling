@@ -314,7 +314,7 @@ def department_exam_schedule(departments, courses, rooms, horizon, n_days, solve
                         assigned_rooms += r.room_code + ","
                 assigned_rooms = assigned_rooms[:-1]
                 data.append({
-                    'Year:': year,
+                    'Year': year,
                     'Course ID': course.course_code,
                     # 'Course Name': course.course_name,
                     'Day': nth_day,
@@ -353,7 +353,7 @@ def faculty_exam_schedule(courses, rooms, horizon, n_days, solver, start_vars, i
         deps = ",".join(deps)
         data.append({
             'Departments': deps,
-            'Year:': course.year,
+            'Year': course.year,
             'Course ID': course.course_code,
             # 'Course Name': course.course_name,
             'Day': nth_day,
@@ -721,10 +721,10 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, sl
     # ---------------------------
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = 600
-    solver.parameters.num_search_workers = 16
+    solver.parameters.num_search_workers = 12 # 12, 16
     solver.parameters.log_search_progress = True
     print(f"symmetry: {solver.parameters.symmetry_level}")
-    solver.parameters.symmetry_level = 2
+    solver.parameters.symmetry_level = 3 # 3, 2
 
     status = solver.Solve(model)
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -1108,7 +1108,7 @@ def unified_manuel_fac_schedule(dfs: dict[str: pd.DataFrame], course_list: list[
         deps = ",".join(deps)
         data.append({
             'Departments': deps,
-            'Year:': course.year,
+            'Year': course.year,
             'Course ID': course.course_code,
             # 'Course Name': course.course_name,
             'Day': date,
@@ -1127,20 +1127,103 @@ def save_manuel_fac(df, exam):
     df.to_excel(fac_xslx_path, index=False)
 
 def read_fac_xlsxs(experiment_no: int, exam: str = None):
-    runs_path = "./runs"
-    runs = os.listdir(runs_path)
-    run = [r for r in runs if "exp" + str(experiment_no) in r]
-    run = run[0]
-    exp_path = os.path.join(runs_path, run)
+    # Construct the path directly using the experiment number
+    exp_path = f"./runs/exp{experiment_no}_{exam[:-1]}"
+    
     faculty_xlsx = "faculty_schedule.xlsx"
     faculty_path = os.path.join(exp_path, faculty_xlsx)
     fac_df_out = pd.read_excel(faculty_path, index_col=None, header=0)
 
-    df_path = "./data/department_schedules_" + exam
-    faculty_path = os.path.join(df_path, "faculty_schedule_manuel_" + exam + ".xlsx")
+    df_path = f"./data/department_schedules_{exam}"
+    faculty_path = os.path.join(df_path, f"faculty_schedule_manuel_{exam}.xlsx")
     fac_df_manuel = pd.read_excel(faculty_path, index_col=None, header=0)
     
     return fac_df_manuel, fac_df_out
+
+def find_unique_rooms(df: pd.DataFrame) -> list[Room]:
+    """
+    Finds unique Room objects from the 'Assigned Rooms' column of a DataFrame.
+
+    This version is more efficient and idiomatic pandas, avoiding explicit loops
+    by using a combination of string operations and set manipulation directly.
+    """
+    # Create a list of all room codes by splitting the strings in the Series
+    # and then flattening the resulting list of lists.
+    all_rooms_list = df['Assigned Rooms'].str.split(',').explode().to_list()
+    
+    # Use a set comprehension for a concise way to collect unique room objects.
+    # The set automatically handles uniqueness.
+    unique_rooms = {Room.find_by_code(code) for code in all_rooms_list}
+
+    return list(unique_rooms)
+
+def room_utilization(df: pd.DataFrame, is_manuel: bool = False):
+    """
+    Calculates room utilization metrics by day and overall.
+    
+    This version uses pandas' groupby for more efficient and readable
+    processing, eliminating the need for nested explicit loops.
+    """
+    def calculate_total_capacity(df):
+        rooms = find_unique_rooms(df)
+        return sum(room.capacity if room.is_lab else room.capacity // 2 for room in rooms)
+    
+    def count_unique_rooms(df):
+        return len(df['Assigned Rooms'].str.split(',').explode().unique())
+        
+    def find_flawed_entries_by_day(df):
+        flawed_entries = df[df['Num Students'] > df['Total Room Cap']]
+        return flawed_entries.groupby('Day').size()
+
+    def calculate_excess_students_by_day(df):
+        # Filter for entries where student count exceeds capacity
+        excess_entries = df[df['Num Students'] > df['Total Room Cap']]
+        # Calculate the excess students for each flawed entry
+        excess_students = excess_entries['Num Students'] - excess_entries['Total Room Cap']
+        # Group the excess students by day and sum them
+        return excess_students.groupby(excess_entries['Day']).sum()
+
+    if not is_manuel:
+        slot_groups = df.groupby(['Day', 'Starting Slot'])
+        slot_capacities = slot_groups.apply(calculate_total_capacity)
+        slot_student_numbers = slot_groups['Num Students'].sum()
+        slot_unique_rooms = slot_groups.apply(count_unique_rooms)
+        daily_capacities = slot_capacities.groupby('Day').sum()
+        daily_student_numbers = slot_student_numbers.groupby('Day').sum()
+        unique_rooms_per_day = df.groupby('Day').apply(count_unique_rooms)
+        daily_active_room_time_slots = slot_unique_rooms.groupby('Day').sum()
+    else:
+        daily_capacities = df.groupby('Day')['Total Room Cap'].sum()
+        daily_student_numbers = df.groupby('Day')['Num Students'].sum()
+        unique_rooms_per_day = df.groupby('Day')['Num Rooms Used'].sum()
+        daily_active_room_time_slots = None
+        
+        flawed_entries_per_day = find_flawed_entries_by_day(df)
+        print(f"Flawed Entries Per Day: {dict(flawed_entries_per_day)}")
+        
+        # Calculate and print the daily sum of excess students
+        daily_excess_students = calculate_excess_students_by_day(df)
+        print(f"Daily Sum of Excess Students: {dict(daily_excess_students)}")
+        # daily_student_numbers = daily_student_numbers - daily_excess_students * 2
+
+    daily_utilizations = daily_student_numbers / daily_capacities
+    overall_utilization = daily_student_numbers.sum() / daily_capacities.sum()
+
+    print(f"Daily Capacities: {list(daily_capacities)}")
+    print(f"Daily Student Numbers: {list(daily_student_numbers)}")
+    print(f"Overall Utilization: {overall_utilization}")
+    print(f"Daily Utilizations: {list(daily_utilizations)}")
+    
+    if is_manuel:
+        active_slots = sum(unique_rooms_per_day)
+        print(f"Daily Active Room-Time Slots: {list(unique_rooms_per_day)}")
+        print(f"Total Active Room-Time Slots: {sum(unique_rooms_per_day)}")
+    else:
+        active_slots = sum(daily_active_room_time_slots)
+        print(f"Daily Active Room-Time Slots: {list(daily_active_room_time_slots)}")
+        print(f"Total Active Room-Time Slots: {active_slots}")
+        
+    return active_slots, overall_utilization
 
 
 def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day: int):
@@ -1150,13 +1233,10 @@ def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day:
     Course.read_courses(course_xlsx, is_midterm)
     Room.read_classroom_data(room_xlsx, num_days, slots_per_day, is_midterm)
 
-    # Off-time per day (e.g. lunch slot = 4)
     off_by_day = [[4] for _ in range(num_days)]
-    off_by_day[4] = off_by_day[4] + [5]  # Day 5 has two off slots
+    off_by_day[4] = off_by_day[4] + [5]
     if num_days >= 10:
         off_by_day[9] = off_by_day[9] + [5]
-
-    off_by_day[3] = off_by_day[3] + [5, 6]  # simulations of 5i exams
 
     TimeSlot.generate_week(num_days, slots_per_day, off_by_day)
     horizon = num_days * slots_per_day
@@ -1165,25 +1245,14 @@ def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day:
     fac_df_manuel, fac_df_out = read_fac_xlsxs(experiment_no, exam)
     print(len(fac_df_manuel), len(fac_df_out))
 
-    """ exam = "finals"
-    dep_dfs, fac_df = read_dfs(experiment_no, exam)
-    fac_df_manuel = unified_manuel_fac_schedule(dep_dfs, Course.course_list)
-    print(len(fac_df), len(fac_df_manuel))
-    save_manuel_fac(fac_df_manuel, exam) """
+    act_ts_au, util_au = room_utilization(fac_df_out)
+    act_ts_ma, util_ma = room_utilization(fac_df_manuel, is_manuel=True)
 
-    mission_count, day_mission_count = total_mission_count(fac_df_out)
-    print(f"TMC: {mission_count}, DMC: {day_mission_count}")
+    room_time_improvement = 100 - (act_ts_au / act_ts_ma) * 100
+    room_utilization_improvement = 100 - (util_ma / util_au) * 100
 
-    manuel_scheduling_count = fac_df_manuel['Num Rooms Used'].sum()
-    print(f"manuel scheduling:{manuel_scheduling_count}")
-    print(f"{mission_count/manuel_scheduling_count:2f}")
-
-    set1 = set(fac_df_out["Course ID"])
-    set2 = set(fac_df_manuel["Course ID"])
-
-    symmetric_diff = set1.symmetric_difference(set2)
-    print(symmetric_diff)
-
+    print(f"Room-Time {room_time_improvement:.2f}% improvement")
+    print(f"Room-Utilization {room_utilization_improvement:.2f}% improvement")
 
 
 
@@ -1197,8 +1266,8 @@ if __name__ == "__main__":
     random.seed(seed)
 
     is_midterm = False
-    num_days = 8
+    num_days = 10 if is_midterm else 8  # midterm:10, final:8
     slots_per_day = 9
     # exam_scheduling_main(experiment, is_midterm, num_days, slots_per_day)
-    analysis(experiment - 1, is_midterm, num_days, slots_per_day)
+    analysis(17, is_midterm, num_days, slots_per_day)
 
