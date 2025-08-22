@@ -720,7 +720,7 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, sl
     # 2) Solve & Report
     # ---------------------------
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 600
+    solver.parameters.max_time_in_seconds = 1200
     solver.parameters.num_search_workers = 12 # 12, 16
     solver.parameters.log_search_progress = True
     print(f"symmetry: {solver.parameters.symmetry_level}")
@@ -1199,7 +1199,7 @@ def room_utilization(df: pd.DataFrame, is_manuel: bool = False):
         daily_active_room_time_slots = None
         
         flawed_entries_per_day = find_flawed_entries_by_day(df)
-        print(f"Flawed Entries Per Day: {dict(flawed_entries_per_day)}")
+        print(f"Total number of infeasbile assignments: {sum(dict(flawed_entries_per_day).values())}")
         
         # Calculate and print the daily sum of excess students
         daily_excess_students = calculate_excess_students_by_day(df)
@@ -1225,8 +1225,100 @@ def room_utilization(df: pd.DataFrame, is_manuel: bool = False):
         
     return active_slots, overall_utilization
 
+# Assume the necessary classes (Room, Course, TimeSlot) and other functions 
+# (read_fac_xlsxs, find_unique_rooms, room_utilization) are defined as you provided.
+
+def analyze_exam_distribution(df: pd.DataFrame, is_midterm: bool):
+    """
+    Analyzes the distribution of exams for each department-year tuple,
+    correctly handling courses shared between multiple departments.
+
+    Args:
+        df: DataFrame containing the schedule.
+        is_midterm: Boolean indicating if the schedule is for midterms.
+
+    Returns:
+        A dictionary with (department, year) tuples as keys and the
+        standard deviation of their daily exam counts as values.
+    """
+    # 1. Preprocess the DataFrame to handle shared departments
+    # Create a new DataFrame where the 'Department' column is split by commas
+    # and then "exploded" into separate rows for each department.
+    df_processed = df.assign(Departments=df['Departments'].str.split(',')).explode('Departments')
+
+    # 2. Group by the now-separated departments and year
+    grouped = df_processed.groupby(['Departments', 'Year'])
+    
+    distribution_std_dev = {}
+
+    for (department, year), group in grouped:
+        # Count exams per day for the current group
+        daily_counts = group.groupby('Day').size()
+        
+        # Determine the set of relevant days for the calculation
+        if is_midterm:
+            # [cite_start]For midterms, the schedule is split into two halves [cite: 165, 166]
+            if year in [1, 3]:
+                relevant_days = range(6)  # First half (Days 0-4)
+            else: # years 2, 4
+                relevant_days = range(6, 11) # Second half (Days 5-9)
+        else:
+            # For finals, use all available days in the schedule
+            num_days = df['Day'].max()
+            relevant_days = range(1, num_days +1)
+        
+        # Ensure all relevant days are included in the series (with 0 if no exams)
+        # This prevents the standard deviation from being skewed by missing days.
+        daily_counts = daily_counts.reindex(list(relevant_days), fill_value=0)
+            
+        # 3. Calculate the standard deviation for the balanced daily counts
+        distribution_std_dev[(department, year)] = np.std(daily_counts)
+        
+    return distribution_std_dev
+
+
+def get_daily_exam_counts(df: pd.DataFrame, is_midterm: bool):
+    """
+    Calculates the daily exam counts for each department-year tuple.
+
+    Args:
+        df: DataFrame containing the schedule.
+        is_midterm: Boolean indicating if the schedule is for midterms.
+
+    Returns:
+        A dictionary where keys are (department, year) tuples and values 
+        are lists of exam counts for each relevant day.
+    """
+    # Preprocess to correctly handle shared departments
+    df_processed = df.assign(Departments=df['Departments'].str.split(',')).explode('Departments')
+    
+    grouped = df_processed.groupby(['Departments', 'Year'])
+    
+    daily_counts_dict = {}
+
+    for (department, year), group in grouped:
+        daily_counts = group.groupby('Day').size()
+        
+        # Determine the relevant days for the schedule
+        if is_midterm:
+            if year in [1, 3]:
+                relevant_days = range(1, 6)  # First half (Days 0-4)
+            else:
+                relevant_days = range(6, 11) # Second half (Days 5-9)
+        else:
+            num_days = df['Day'].max()
+            relevant_days = range(1, num_days+1)
+        
+        # Reindex to ensure all days are present, filling missing with 0
+        full_daily_counts = daily_counts.reindex(list(relevant_days), fill_value=0)
+            
+        daily_counts_dict[(department, year)] = full_daily_counts.to_list()
+        
+    return daily_counts_dict
+
 
 def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day: int):
+    # ... (your existing setup code for reading courses, rooms, etc.)
     course_xlsx = "./data/BerkData2.xlsx"
     room_xlsx = "./data/New Microsoft Excel Worksheet.xlsx"
 
@@ -1243,16 +1335,103 @@ def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day:
 
     exam = "midterms" if is_midterm else "finals"
     fac_df_manuel, fac_df_out = read_fac_xlsxs(experiment_no, exam)
-    print(len(fac_df_manuel), len(fac_df_out))
+    print(f"Manual Schedule Entries: {len(fac_df_manuel)}, Automated Schedule Entries: {len(fac_df_out)}")
+    print("-" * 30)
 
+    print("--- Room Utilization Analysis (Automated) ---")
     act_ts_au, util_au = room_utilization(fac_df_out)
+    print("\n--- Room Utilization Analysis (Manual) ---")
     act_ts_ma, util_ma = room_utilization(fac_df_manuel, is_manuel=True)
+    print("-" * 30)
 
     room_time_improvement = 100 - (act_ts_au / act_ts_ma) * 100
     room_utilization_improvement = 100 - (util_ma / util_au) * 100
 
-    print(f"Room-Time {room_time_improvement:.2f}% improvement")
-    print(f"Room-Utilization {room_utilization_improvement:.2f}% improvement")
+    print(f"\nRoom-Time Improvement: {room_time_improvement:.2f}%")
+    print(f"Room-Utilization Improvement: {room_utilization_improvement:.2f}%")
+    print("-" * 30)
+
+    # --- New Analysis for Exam Distribution ---
+    print("\n--- Exam Distribution Analysis ---")
+    dist_manual = analyze_exam_distribution(fac_df_manuel, is_midterm)
+    dist_auto = analyze_exam_distribution(fac_df_out, is_midterm)
+
+    avg_std_manual = np.mean(list(dist_manual.values()))
+    avg_std_auto = np.mean(list(dist_auto.values()))
+    
+    distribution_improvement = 100 - (avg_std_auto / avg_std_manual) * 100
+
+    print(f"Average Standard Deviation of Daily Exams (Manual): {avg_std_manual:.2f}")
+    print(f"Average Standard Deviation of Daily Exams (Automated): {avg_std_auto:.2f}")
+    print(f"Improvement in Exam Distribution Uniformity: {distribution_improvement:.2f}%")
+    
+    # You can also print the detailed distribution for each department-year if you want
+    #print("\nDetailed Distribution (Manual):", dist_manual)
+    #print("Detailed Distribution (Automated):", dist_auto)
+
+        # --- New Analysis for Exam Distribution ---
+    print("\n" + "="*40)
+    print("--- Daily Exam Distribution Analysis ---")
+    print("="*40)
+    
+    manual_counts = get_daily_exam_counts(fac_df_manuel, is_midterm)
+    auto_counts = get_daily_exam_counts(fac_df_out, is_midterm)
+
+    # Prepare data for a comparison DataFrame
+    comparison_data = []
+    all_keys = sorted(manual_counts.keys() | auto_counts.keys()) # Use union of keys
+
+    for dept, year in all_keys:
+        manual_dist = manual_counts.get((dept, year), 'N/A')
+        auto_dist = auto_counts.get((dept, year), 'N/A')
+        
+        comparison_data.append({
+            "Department": dept,
+            "Year": year,
+            "Manual": manual_dist,
+            "Automated": auto_dist
+        })
+        
+    # Create and display the DataFrame
+    comparison_df = pd.DataFrame(comparison_data)
+    
+    # Optional: Set pandas display options to see the full lists
+    pd.set_option('display.max_rows', 500)
+    pd.set_option('display.max_columns', 50)
+    pd.set_option('display.width', 1000)
+    pd.set_option('display.max_colwidth', None)
+
+    # --- add 4 faculty-wide rows (sum across departments) ---
+
+    def _elemwise_sum(series):
+        lists = [x for x in series if isinstance(x, (list, tuple))]
+        if not lists:
+            return []
+        maxlen = max(len(l) for l in lists)
+        total = [0] * maxlen
+        for l in lists:
+            for i, v in enumerate(l):
+                total[i] += int(v)
+        return total
+
+    faculty = (
+        comparison_df
+        .groupby('Year', sort=True)
+        .agg({'Manual': _elemwise_sum, 'Automated': _elemwise_sum})
+        .reset_index()
+    )
+    faculty.insert(0, 'Department', 'FACULTY')
+
+    # append to your table
+    comparison_df = pd.concat([comparison_df, faculty], ignore_index=True)
+
+    # show just the 4 added rows
+    print("\n=== FACULTY totals (per-day counts) ===")
+    print(faculty.to_string(index=False))
+    #print(comparison_df.to_string(index=False))
+    
+
+
 
 
 
@@ -1268,6 +1447,7 @@ if __name__ == "__main__":
     is_midterm = False
     num_days = 10 if is_midterm else 8  # midterm:10, final:8
     slots_per_day = 9
-    # exam_scheduling_main(experiment, is_midterm, num_days, slots_per_day)
-    analysis(17, is_midterm, num_days, slots_per_day)
+    #exam_scheduling_main(experiment, is_midterm, num_days, slots_per_day)
+    analysis(19, is_midterm, num_days, slots_per_day)
+
 
