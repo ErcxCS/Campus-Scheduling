@@ -1229,91 +1229,59 @@ def room_utilization(df: pd.DataFrame, is_manuel: bool = False):
 # (read_fac_xlsxs, find_unique_rooms, room_utilization) are defined as you provided.
 
 def analyze_exam_distribution(df: pd.DataFrame, is_midterm: bool):
-    """
-    Analyzes the distribution of exams for each department-year tuple,
-    correctly handling courses shared between multiple departments.
-
-    Args:
-        df: DataFrame containing the schedule.
-        is_midterm: Boolean indicating if the schedule is for midterms.
-
-    Returns:
-        A dictionary with (department, year) tuples as keys and the
-        standard deviation of their daily exam counts as values.
-    """
-    # 1. Preprocess the DataFrame to handle shared departments
-    # Create a new DataFrame where the 'Department' column is split by commas
-    # and then "exploded" into separate rows for each department.
     df_processed = df.assign(Departments=df['Departments'].str.split(',')).explode('Departments')
-
-    # 2. Group by the now-separated departments and year
     grouped = df_processed.groupby(['Departments', 'Year'])
-    
     distribution_std_dev = {}
 
     for (department, year), group in grouped:
-        # Count exams per day for the current group
         daily_counts = group.groupby('Day').size()
-        
-        # Determine the set of relevant days for the calculation
+
         if is_midterm:
-            # [cite_start]For midterms, the schedule is split into two halves [cite: 165, 166]
             if year in [1, 3]:
-                relevant_days = range(6)  # First half (Days 0-4)
-            else: # years 2, 4
-                relevant_days = range(6, 11) # Second half (Days 5-9)
+                relevant_days = range(1, 6)     # days 1..5
+            else:
+                relevant_days = range(6, 11)    # days 6..10
         else:
-            # For finals, use all available days in the schedule
-            num_days = df['Day'].max()
-            relevant_days = range(1, num_days +1)
-        
-        # Ensure all relevant days are included in the series (with 0 if no exams)
-        # This prevents the standard deviation from being skewed by missing days.
+            num_days = int(df['Day'].max())
+            relevant_days = range(1, num_days + 1)
+
         daily_counts = daily_counts.reindex(list(relevant_days), fill_value=0)
-            
-        # 3. Calculate the standard deviation for the balanced daily counts
-        distribution_std_dev[(department, year)] = np.std(daily_counts)
-        
+        distribution_std_dev[(department, year)] = np.std(daily_counts.values)  # population std
+
     return distribution_std_dev
 
 
 def get_daily_exam_counts(df: pd.DataFrame, is_midterm: bool):
     """
     Calculates the daily exam counts for each department-year tuple.
-
-    Args:
-        df: DataFrame containing the schedule.
-        is_midterm: Boolean indicating if the schedule is for midterms.
-
-    Returns:
-        A dictionary where keys are (department, year) tuples and values 
-        are lists of exam counts for each relevant day.
+    Returns full-horizon vectors (e.g., 10 days for midterms) so that
+    downstream aggregation sees consistent lengths.
     """
-    # Preprocess to correctly handle shared departments
     df_processed = df.assign(Departments=df['Departments'].str.split(',')).explode('Departments')
-    
     grouped = df_processed.groupby(['Departments', 'Year'])
-    
     daily_counts_dict = {}
 
+    # full horizon
+    num_days = int(df['Day'].max())  # midterms should be 10
+    full_index = list(range(1, num_days + 1))
+
     for (department, year), group in grouped:
-        daily_counts = group.groupby('Day').size()
-        
-        # Determine the relevant days for the schedule
+        base_counts = group.groupby('Day').size()
+
         if is_midterm:
+            # relevant half depends on year
             if year in [1, 3]:
-                relevant_days = range(1, 6)  # First half (Days 0-4)
+                relevant_days = range(1, 6)          # days 1-5
             else:
-                relevant_days = range(6, 11) # Second half (Days 5-9)
+                relevant_days = range(6, 11)         # days 6-10
         else:
-            num_days = df['Day'].max()
-            relevant_days = range(1, num_days+1)
-        
-        # Reindex to ensure all days are present, filling missing with 0
-        full_daily_counts = daily_counts.reindex(list(relevant_days), fill_value=0)
-            
-        daily_counts_dict[(department, year)] = full_daily_counts.to_list()
-        
+            relevant_days = full_index
+
+        # build full-horizon vector with zeros outside relevant half
+        full_series = pd.Series(0, index=full_index, dtype=int)
+        full_series.loc[list(relevant_days)] = base_counts.reindex(list(relevant_days), fill_value=0)
+        daily_counts_dict[(department, year)] = full_series.to_list()
+
     return daily_counts_dict
 
 
@@ -1414,20 +1382,29 @@ def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day:
                 total[i] += int(v)
         return total
 
-    faculty = (
+    # Existing per-year faculty rows (might be 5-day if you didn't change the function)
+    faculty_by_year = (
         comparison_df
         .groupby('Year', sort=True)
         .agg({'Manual': _elemwise_sum, 'Automated': _elemwise_sum})
         .reset_index()
     )
-    faculty.insert(0, 'Department', 'FACULTY')
+    faculty_by_year.insert(0, 'Department', 'FACULTY')
 
-    # append to your table
-    comparison_df = pd.concat([comparison_df, faculty], ignore_index=True)
+    # NEW: faculty-wide 10-day roll-up (ALL years combined)
+    faculty_all = pd.DataFrame([{
+        'Department': 'FACULTY',
+        'Year': 'ALL',
+        'Manual': _elemwise_sum(comparison_df['Manual']),
+        'Automated': _elemwise_sum(comparison_df['Automated']),
+    }])
 
-    # show just the 4 added rows
-    print("\n=== FACULTY totals (per-day counts) ===")
-    print(faculty.to_string(index=False))
+    # Append both to your table
+    comparison_df = pd.concat([comparison_df, faculty_by_year, faculty_all], ignore_index=True)
+
+    print("\n=== FACULTY totals (per-year and ALL 10 days) ===")
+    print(faculty_by_year.to_string(index=False))
+    print(faculty_all.to_string(index=False))
     #print(comparison_df.to_string(index=False))
     
 
@@ -1444,10 +1421,10 @@ if __name__ == "__main__":
     np.random.seed(seed)
     random.seed(seed)
 
-    is_midterm = False
+    is_midterm = True
     num_days = 10 if is_midterm else 8  # midterm:10, final:8
     slots_per_day = 9
     #exam_scheduling_main(experiment, is_midterm, num_days, slots_per_day)
-    analysis(19, is_midterm, num_days, slots_per_day)
+    analysis(18, is_midterm, num_days, slots_per_day)
 
 
