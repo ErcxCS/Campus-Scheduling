@@ -451,7 +451,7 @@ def mission_report(solver, start_vars, slots_per_day, in_room_vars, num_days):
     plot_dep_year_exam_counts(dep_year_per_day, num_days)
 
 
-def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day: int):
+def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day: int, timeout: int = 600):
     # ---------------------------
     # 0) Parameters & Data Loading
     # ---------------------------
@@ -459,8 +459,8 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, sl
     # TODO: There should be no exam starting in a room while there is an active exam going on
     # within active time slot chunk
 
-    course_xlsx = "./data/BerkData2.xlsx"
-    room_xlsx = "./data/New Microsoft Excel Worksheet.xlsx"
+    course_xlsx = "./data/course_data.xlsx"
+    room_xlsx = "./data/room_data.xlsx"
 
     Course.read_courses(course_xlsx, is_midterm)
     Room.read_classroom_data(room_xlsx, num_days, slots_per_day, is_midterm)
@@ -543,7 +543,7 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, sl
                             capacity=3)
 
     # (X) Exams in the same room that overlap must start at the same time
-    """ for r in Room.room_list:
+    for r in Room.room_list:
         for i in range(len(Course.course_list)):
             for j in range(i+1, len(Course.course_list)):
                 e = Course.course_list[i]
@@ -571,7 +571,7 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, sl
                     in_room[(e.id, r.id)],
                     in_room[(f.id, r.id)],
                     overlap
-                ]) """
+                ])
 
     # (5) Dept/Year no-overlap
     dept_year_intervals = {}
@@ -720,7 +720,7 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, sl
     # 2) Solve & Report
     # ---------------------------
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 1200
+    solver.parameters.max_time_in_seconds = timeout
     solver.parameters.num_search_workers = 12 # 12, 16
     solver.parameters.log_search_progress = True
     print(f"symmetry: {solver.parameters.symmetry_level}")
@@ -1204,7 +1204,7 @@ def room_utilization(df: pd.DataFrame, is_manuel: bool = False):
         # Calculate and print the daily sum of excess students
         daily_excess_students = calculate_excess_students_by_day(df)
         print(f"Daily Sum of Excess Students: {dict(daily_excess_students)}")
-        # daily_student_numbers = daily_student_numbers - daily_excess_students * 2
+        daily_student_numbers = daily_student_numbers - daily_excess_students * 2
 
     daily_utilizations = daily_student_numbers / daily_capacities
     overall_utilization = daily_student_numbers.sum() / daily_capacities.sum()
@@ -1287,8 +1287,8 @@ def get_daily_exam_counts(df: pd.DataFrame, is_midterm: bool):
 
 def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day: int):
     # ... (your existing setup code for reading courses, rooms, etc.)
-    course_xlsx = "./data/BerkData2.xlsx"
-    room_xlsx = "./data/New Microsoft Excel Worksheet.xlsx"
+    course_xlsx = "./data/course_data.xlsx"
+    room_xlsx = "./data/room_data.xlsx"
 
     Course.read_courses(course_xlsx, is_midterm)
     Room.read_classroom_data(room_xlsx, num_days, slots_per_day, is_midterm)
@@ -1421,10 +1421,10 @@ if __name__ == "__main__":
     np.random.seed(seed)
     random.seed(seed)
 
-    is_midterm = True
+    is_midterm = False
     num_days = 10 if is_midterm else 8  # midterm:10, final:8
     slots_per_day = 9
-    #exam_scheduling_main(experiment, is_midterm, num_days, slots_per_day)
-    analysis(18, is_midterm, num_days, slots_per_day)
+    exam_scheduling_main(experiment, is_midterm, num_days, slots_per_day, 1800)
+    # analysis(experiment - 1, is_midterm, num_days, slots_per_day)
 
 
