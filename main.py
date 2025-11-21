@@ -474,7 +474,7 @@ def exam_scheduling_main(experiment_no: int,
     if num_days >= 10:
         off_by_day[9] = off_by_day[9] + [5]
 
-    #off_by_day[3] = off_by_day[3] + [5, 6]  # simulations of 5i exams
+    off_by_day[3] = off_by_day[3] + [5, 6]  # simulations of 5i exams
 
     TimeSlot.generate_week(num_days, slots_per_day, off_by_day)
     horizon = num_days * slots_per_day
@@ -543,7 +543,7 @@ def exam_scheduling_main(experiment_no: int,
         # Also enforce a "no more than 3 simultaneous exams" hard cap per room:
         model.AddCumulative(intervals=opt_int_per_room[r.id],
                             demands=[1] * len(Course.course_list),
-                            capacity=1)
+                            capacity=3)
 
     """ # (X) Exams in the same room that overlap must start at the same time
     for r in Room.room_list:
@@ -1288,29 +1288,286 @@ def get_daily_exam_counts(df: pd.DataFrame, is_midterm: bool):
     return daily_counts_dict
 
 
+def compact_columns(df: pd.DataFrame) -> pd.DataFrame:
+    import pandas as pd
+
+    compact = {}
+
+    for col in df.columns:
+        # get non-empty values
+        non_empty = [x for x in df[col].tolist() if x != ""]
+        # pad with empty strings to keep consistent length
+        padded = non_empty + [""] * (len(df) - len(non_empty))
+        compact[col] = padded
+
+    compact_df = pd.DataFrame(compact)
+
+    # remove any rows that become fully empty (optional)
+    mask = (compact_df != "").any(axis=1)
+    compact_df = compact_df.loc[mask].reset_index(drop=True)
+    compact_df.index = range(1, len(compact_df) + 1)
+
+    return compact_df
+
+
+def automated_df_rebuild(df: pd.DataFrame) -> pd.DataFrame:
+    import pandas as pd
+
+    # Parse Assigned Rooms string → list
+    df["RoomsList"] = df["Assigned Rooms"].apply(lambda s: [r.strip() for r in s.split(",")])
+
+    # Collect unique rooms
+    rooms = sorted({room for lst in df["RoomsList"] for room in lst})
+
+    # 72 global timeslots (8 days × 9 slots)
+    TOTAL_ROWS = 8 * 9
+    timetable = pd.DataFrame("", index=range(1, TOTAL_ROWS + 1), columns=rooms)
+
+    # Fix 0-based starting slot
+    if df["Starting Slot"].min() == 0:
+        df["Starting Slot"] = df["Starting Slot"] + 1
+
+    # Fill at starting slot
+    for _, row in df.iterrows():
+        day = int(row["Day"])
+        start_slot = int(row["Starting Slot"])
+        course_id = row["Course ID"]
+        room_list = row["RoomsList"]
+
+        # Global row index (1-based)
+        row_index = (day - 1) * 9 + start_slot
+
+        for room in room_list:
+            if timetable.at[row_index, room] == "":
+                timetable.at[row_index, room] = course_id
+            else:
+                timetable.at[row_index, room] += " | " + course_id
+
+    # Remove globally empty rows
+    mask = (timetable != "").any(axis=1)
+    flat = timetable.loc[mask].reset_index(drop=True)
+    flat.index = range(1, len(flat) + 1)
+
+    # Remove internal gaps inside columns
+    flat = compact_columns(flat)
+
+    return flat
+
+
 def frequency_table(experiment_no: int, exam: str):
+    import os
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    import ast
+
+    # ===============================
+    # 1) LOAD BEAUTIFIED TIMETABLE
+    # ===============================
     exp_path = f"./runs/exp{experiment_no}_{exam[:-1]}"
-    
     timetable_xlsx = "beautified_exam_schedule.xlsx"
     timetable_path = os.path.join(exp_path, timetable_xlsx)
     timetable_df = pd.read_excel(timetable_path, index_col=None, header=0)
-    import matplotlib.pyplot as plt
 
+    # ===============================
+    #  AUTOMATED TIMETABLE REBUILD
+    # ===============================
+    automated_xlsx = "faculty_schedule.xlsx"
+    automated_path = os.path.join(exp_path, automated_xlsx)
+    automated_df = pd.read_excel(automated_path, index_col=None, header=0)
+
+    final_automated_df = automated_df_rebuild(automated_df)
+    final_automated_df.to_excel("faculty_schedule_automated_finals.xlsx")
+
+    # --- Sort automated timetable like manual ---
+    automated_clean = final_automated_df.replace("", pd.NA)
+    usage_automated = automated_clean.notna().sum(axis=0).sort_values(ascending=False)
+
+    auto_sorted_cols = usage_automated.index
+    auto_sorted_df = final_automated_df[auto_sorted_cols]
+
+    auto_final_df = auto_sorted_df.T
+    auto_final_df = auto_final_df.loc[
+        auto_final_df.replace("", pd.NA).notna().sum(axis=1).sort_values(ascending=False).index
+]
+
+    auto_final_df.to_excel("faculty_schedule_automated_finals_sorted.xlsx")
+
+    # Compute usage for beautified schedule
     cols = timetable_df.columns.drop("Day")
-
-    non_nan_counts = (
+    usage_beautified = (
         timetable_df[cols]
         .notna()
         .sum()
         .sort_values(ascending=False)
     )
 
-    plt.figure(figsize=(10, 4))
-    plt.bar(non_nan_counts.index, non_nan_counts.values)
-    plt.xticks(rotation=45, ha="right")
-    plt.title("Non-NaN entries per column (excluding day)")
+    # ========================================================
+    # 2) REBUILD TIMETABLE FROM MANUAL FACULTY SCHEDULE
+    # ========================================================
+    path_in = "./data/department_schedules_finals/faculty_schedule_manuel_finals.xlsx"
+    path_out = "./faculty_schedule_manuel_finals_timetable.xlsx"
+
+    df = pd.read_excel(path_in)
+
+    # Parse Assigned Rooms string → Python list
+    df["RoomsList"] = df["Assigned Rooms"].apply(ast.literal_eval)
+
+    # Collect all unique rooms
+    rooms = sorted({r for lst in df["RoomsList"] for r in lst})
+
+    # Create timetable (64 rows, one per timeslot)
+    n_rows = 8 * 8  # 8 days * 8 slots
+    timetable = pd.DataFrame("", index=range(1, n_rows + 1), columns=rooms)
+
+    # Track next free timeslot for each room
+    room_next_row = {room: 1 for room in rooms}
+
+    # Fill timetable
+    for _, row in df.sort_values("Day").iterrows():
+        course_id = row["Course ID"]
+        for room in row["RoomsList"]:
+            start = room_next_row[room]
+            timetable.loc[start, room] = course_id
+            timetable.loc[start + 1, room] = course_id
+            room_next_row[room] += 2
+
+    # ========================================================
+    # 3) Collapse every 2 timeslots → 1 exam block
+    # ========================================================
+    merged = pd.DataFrame(columns=timetable.columns)
+
+    for i in range(0, len(timetable), 2):
+        block = {}
+        for room in timetable.columns:
+            top = timetable.iloc[i][room]
+            bottom = timetable.iloc[i + 1][room]
+            block[room] = top if top != "" else bottom
+        merged.loc[i // 2] = block
+
+    merged.index = range(1, len(merged) + 1)
+
+    # ========================================================
+    # 4) Sort columns (optional), transpose, sort rows by usage
+    # ========================================================
+    # Sort columns by usage before transpose
+    sorted_cols = merged.notna().sum().sort_values(ascending=False).index
+    merged_sorted = merged[sorted_cols]
+
+    # Transpose -> rows are rooms
+    final_df = merged_sorted.T
+
+    # Treat empty strings as NaN
+    clean = final_df.replace("", pd.NA)
+
+    # Compute usage per room
+    usage_generated = clean.notna().sum(axis=1)
+
+    # Sort rooms by usage
+    sorted_rows = usage_generated.sort_values(ascending=False).index
+    final_df = final_df.loc[sorted_rows]
+
+    # Save timetable
+    final_df.to_excel(path_out, index_label="Room")
+
+    # ========================================================
+    # 5) TWO-WAY USAGE COMPARISON PLOT (Manual vs Automated)
+    # ========================================================
+
+    fig, axes = plt.subplots(1, 2, figsize=(18, 6))
+
+    max_y = max(
+        usage_generated.max(),
+        usage_automated.max()
+    )
+
+    # ------------------------------
+    # Plot 1: Manual Schedule
+    # ------------------------------
+    axes[0].bar(
+        usage_generated.sort_values(ascending=False).index,
+        usage_generated.sort_values(ascending=False).values
+    )
+    axes[0].set_title("Manual Schedule — Room Usage")
+    axes[0].tick_params(axis="x", rotation=90)
+    axes[0].set_ylim(0, max_y)
+    axes[0].set_xlabel("Rooms")
+    axes[0].set_ylabel("Mission Count")
+
+    # ------------------------------
+    # Plot 2: Automated Schedule
+    # ------------------------------
+    axes[1].bar(usage_automated.index, usage_automated.values)
+    axes[1].set_title("Automated Schedule — Room Usage")
+    axes[1].tick_params(axis="x", rotation=90)
+    axes[1].set_ylim(0, max_y)
+    axes[1].set_xlabel("Rooms")
+    axes[1].set_ylabel("Mission Count")
+
     plt.tight_layout()
     plt.show()
+
+
+    import seaborn as sns
+    import numpy as np
+
+
+    # Convert strings → 1 (occupied) and empty → 0
+    def to_binary(df):
+        return df.replace("", np.nan).notna().astype(int)
+
+    h_beautified = to_binary(timetable_df.drop(columns=["Day"]))
+    h_manual     = to_binary(final_df)
+    h_auto       = to_binary(auto_final_df)
+
+    # --- Build mapping: room_code → "room_code (capacity)" ---
+    room_label_map = {
+        room.room_code: f"{room.room_code} ({room.capacity // 2 if not room.is_lab else room.capacity})"
+        for room in Room.room_list
+    }
+
+    # --- Rename rows for manual + automated ---
+    h_manual.index = [room_label_map.get(idx, idx) for idx in h_manual.index]
+    h_auto.index   = [room_label_map.get(idx, idx) for idx in h_auto.index]
+
+    # Plot 3 heatmaps
+    fig, axes = plt.subplots(1, 3, figsize=(25, 10))
+
+    vmax = 1
+
+    sns.heatmap(h_beautified, ax=axes[0], cmap="Blues", cbar=False, vmax=vmax)
+    axes[0].set_title("Heatmap — My Method (Beautified)")
+    axes[0].set_xlabel("Rooms")
+    axes[0].set_ylabel("Timeslots / Blocks")
+
+    sns.heatmap(h_manual, ax=axes[1], cmap="Greens", cbar=False, vmax=vmax)
+    axes[1].set_title("Heatmap — Manual Schedule")
+    axes[1].set_xlabel("Blocks")
+    axes[1].set_ylabel("Rooms")
+
+    sns.heatmap(h_auto, ax=axes[2], cmap="Reds", cbar=False, vmax=vmax)
+    axes[2].set_title("Heatmap — Automated Schedule")
+    axes[2].set_xlabel("Blocks")
+    axes[2].set_ylabel("Rooms")
+
+    # -----------------------------
+    # KEEP SAME X-AXIS SCALE FOR MANUAL & AUTOMATED
+    # -----------------------------
+
+    # both must use the same number of columns
+    max_x = max(h_manual.shape[1], h_auto.shape[1])
+
+    # force same x-axis range and ticks
+    for ax in [axes[1], axes[2]]:
+        ax.set_xlim(0, max_x)
+        ax.set_xticks(range(max_x))
+
+    plt.tight_layout()
+    plt.show()
+
+
+    print("Timetable saved to:", path_out)
+
+
 
 
 def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day: int):
@@ -1448,17 +1705,17 @@ if __name__ == "__main__":
     random.seed(seed)
 
     is_midterm = False
-    num_days = 10 if is_midterm else 8  # midterm:10, final:8
+    num_days = 10 if is_midterm else 9  # midterm:10, final:8
     slots_per_day = 9
 
     course_xlsx = "./data/course_data3.xlsx"
     room_xlsx = "./data/room_data.xlsx"
 
-    """ exam_scheduling_main(experiment,
+    exam_scheduling_main(experiment,
                          is_midterm,
                          num_days,
                          slots_per_day,
                          1200,
                          course_xlsx,
-                         room_xlsx) """
-    analysis(experiment - 3, is_midterm, num_days, slots_per_day)
+                         room_xlsx)
+    # analysis(experiment - 3, is_midterm, num_days, slots_per_day)
