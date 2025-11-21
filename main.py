@@ -451,16 +451,19 @@ def mission_report(solver, start_vars, slots_per_day, in_room_vars, num_days):
     plot_dep_year_exam_counts(dep_year_per_day, num_days)
 
 
-def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day: int, timeout: int = 600):
+def exam_scheduling_main(experiment_no: int,
+                         is_midterm: bool, 
+                         num_days: int, 
+                         slots_per_day: int, 
+                         timeout: int = 600,
+                         course_xlsx: str = "",
+                         room_xlsx: str = ""):
     # ---------------------------
     # 0) Parameters & Data Loading
     # ---------------------------
     # TODO!: Fix exam start times
     # TODO: There should be no exam starting in a room while there is an active exam going on
     # within active time slot chunk
-
-    course_xlsx = "./data/course_data.xlsx"
-    room_xlsx = "./data/room_data.xlsx"
 
     Course.read_courses(course_xlsx, is_midterm)
     Room.read_classroom_data(room_xlsx, num_days, slots_per_day, is_midterm)
@@ -540,9 +543,9 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, sl
         # Also enforce a "no more than 3 simultaneous exams" hard cap per room:
         model.AddCumulative(intervals=opt_int_per_room[r.id],
                             demands=[1] * len(Course.course_list),
-                            capacity=3)
+                            capacity=1)
 
-    # (X) Exams in the same room that overlap must start at the same time
+    """ # (X) Exams in the same room that overlap must start at the same time
     for r in Room.room_list:
         for i in range(len(Course.course_list)):
             for j in range(i+1, len(Course.course_list)):
@@ -571,7 +574,7 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, sl
                     in_room[(e.id, r.id)],
                     in_room[(f.id, r.id)],
                     overlap
-                ])
+                ]) """
 
     # (5) Dept/Year no-overlap
     dept_year_intervals = {}
@@ -724,7 +727,7 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int, sl
     solver.parameters.num_search_workers = 12 # 12, 16
     solver.parameters.log_search_progress = True
     print(f"symmetry: {solver.parameters.symmetry_level}")
-    solver.parameters.symmetry_level = 3 # 3, 2
+    solver.parameters.symmetry_level = 2 # 3, 2
 
     status = solver.Solve(model)
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -1285,6 +1288,31 @@ def get_daily_exam_counts(df: pd.DataFrame, is_midterm: bool):
     return daily_counts_dict
 
 
+def frequency_table(experiment_no: int, exam: str):
+    exp_path = f"./runs/exp{experiment_no}_{exam[:-1]}"
+    
+    timetable_xlsx = "beautified_exam_schedule.xlsx"
+    timetable_path = os.path.join(exp_path, timetable_xlsx)
+    timetable_df = pd.read_excel(timetable_path, index_col=None, header=0)
+    import matplotlib.pyplot as plt
+
+    cols = timetable_df.columns.drop("Day")
+
+    non_nan_counts = (
+        timetable_df[cols]
+        .notna()
+        .sum()
+        .sort_values(ascending=False)
+    )
+
+    plt.figure(figsize=(10, 4))
+    plt.bar(non_nan_counts.index, non_nan_counts.values)
+    plt.xticks(rotation=45, ha="right")
+    plt.title("Non-NaN entries per column (excluding day)")
+    plt.tight_layout()
+    plt.show()
+
+
 def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day: int):
     # ... (your existing setup code for reading courses, rooms, etc.)
     course_xlsx = "./data/course_data.xlsx"
@@ -1303,6 +1331,8 @@ def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day:
 
     exam = "midterms" if is_midterm else "finals"
     fac_df_manuel, fac_df_out = read_fac_xlsxs(experiment_no, exam)
+    frequency_table(experiment_no, exam)
+
     print(f"Manual Schedule Entries: {len(fac_df_manuel)}, Automated Schedule Entries: {len(fac_df_out)}")
     print("-" * 30)
 
@@ -1405,11 +1435,7 @@ def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day:
     print("\n=== FACULTY totals (per-year and ALL 10 days) ===")
     print(faculty_by_year.to_string(index=False))
     print(faculty_all.to_string(index=False))
-    #print(comparison_df.to_string(index=False))
-    
-
-
-
+    # print(comparison_df.to_string(index=False))
 
 
 if __name__ == "__main__":
@@ -1424,7 +1450,15 @@ if __name__ == "__main__":
     is_midterm = False
     num_days = 10 if is_midterm else 8  # midterm:10, final:8
     slots_per_day = 9
-    exam_scheduling_main(experiment, is_midterm, num_days, slots_per_day, 1800)
-    # analysis(experiment - 1, is_midterm, num_days, slots_per_day)
 
+    course_xlsx = "./data/course_data3.xlsx"
+    room_xlsx = "./data/room_data.xlsx"
 
+    """ exam_scheduling_main(experiment,
+                         is_midterm,
+                         num_days,
+                         slots_per_day,
+                         1200,
+                         course_xlsx,
+                         room_xlsx) """
+    analysis(experiment - 3, is_midterm, num_days, slots_per_day)
