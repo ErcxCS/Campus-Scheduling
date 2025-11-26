@@ -32,5 +32,5 @@ env/
 env/**
 
 # ignore experiments?
-runs/
-runs/**
+!runs/
+!runs/**
