@@ -543,10 +543,10 @@ def exam_scheduling_main(experiment_no: int,
         # Also enforce a "no more than 3 simultaneous exams" hard cap per room:
         model.AddCumulative(intervals=opt_int_per_room[r.id],
                             demands=[1] * len(Course.course_list),
-                            capacity=3)
+                            capacity=1)
 
-    """ # (X) Exams in the same room that overlap must start at the same time
-    for r in Room.room_list:
+    # (X) Exams in the same room that overlap must start at the same time
+    """ for r in Room.room_list:
         for i in range(len(Course.course_list)):
             for j in range(i+1, len(Course.course_list)):
                 e = Course.course_list[i]
@@ -1588,7 +1588,7 @@ def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day:
 
     exam = "midterms" if is_midterm else "finals"
     fac_df_manuel, fac_df_out = read_fac_xlsxs(experiment_no, exam)
-    frequency_table(experiment_no, exam)
+    #frequency_table(experiment_no, exam)
 
     print(f"Manual Schedule Entries: {len(fac_df_manuel)}, Automated Schedule Entries: {len(fac_df_out)}")
     print("-" * 30)
@@ -1711,11 +1711,11 @@ if __name__ == "__main__":
     course_xlsx = "./data/course_data3.xlsx"
     room_xlsx = "./data/room_data.xlsx"
 
-    exam_scheduling_main(experiment,
+    """ exam_scheduling_main(experiment,
                          is_midterm,
                          num_days,
                          slots_per_day,
-                         1200,
+                         3600,
                          course_xlsx,
-                         room_xlsx)
-    # analysis(experiment - 3, is_midterm, num_days, slots_per_day)
+                         room_xlsx) """
+    analysis(experiment - 1, is_midterm, num_days, slots_per_day)
