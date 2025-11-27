@@ -464,6 +464,7 @@ def exam_scheduling_main(experiment_no: int,
     # TODO!: Fix exam start times
     # TODO: There should be no exam starting in a room while there is an active exam going on
     # within active time slot chunk
+    SMALL_EXAM_THRESHOLD = 10
 
     Course.read_courses(course_xlsx, is_midterm)
     Room.read_classroom_data(room_xlsx, num_days, slots_per_day, is_midterm)
@@ -522,7 +523,7 @@ def exam_scheduling_main(experiment_no: int,
     for e in Course.course_list:
         model.Add(sum(seat[(e.id, r.id)] for r in Room.room_list) == e.n_students)
 
-    # (4) Optional intervals + no-overlap per room
+    # (4) Optional intervals + room-level capacity / overlap rules
     opt_int_per_room = {r.id: [] for r in Room.room_list}
     for e in Course.course_list:
         for r in Room.room_list:
@@ -535,18 +536,43 @@ def exam_scheduling_main(experiment_no: int,
             )
             opt_int_per_room[r.id].append(opt)
 
-    for r in Room.room_list:
-        demands = [seat[(e.id, r.id)] for e in Course.course_list]
-        cap = r.capacity if r.is_lab else r.capacity // 2
-        model.AddCumulative(intervals=opt_int_per_room[r.id], demands=demands, capacity=cap)
+    # Precompute which exams are "small" vs "large"
+    is_small = {e.id: (e.n_students <= SMALL_EXAM_THRESHOLD) for e in Course.course_list}
 
-        # Also enforce a "no more than 3 simultaneous exams" hard cap per room:
-        model.AddCumulative(intervals=opt_int_per_room[r.id],
-                            demands=[1] * len(Course.course_list),
-                            capacity=1)
+    for r in Room.room_list:
+        # 4.a) Seat capacity (your original cumulative)
+        seat_demands = [seat[(e.id, r.id)] for e in Course.course_list]
+        cap = r.capacity if r.is_lab else r.capacity // 2
+        model.AddCumulative(
+            intervals=opt_int_per_room[r.id],
+            demands=seat_demands,
+            capacity=cap
+        )
+
+        # 4.b) (OPTIONAL) limit total simultaneous exams in a room
+        # NOTE: your comment says "no more than 3", so capacity=3 is consistent.
+        # If you really want at most 1 exam at a time, change back to 1.
+        model.AddCumulative(
+            intervals=opt_int_per_room[r.id],
+            demands=[1] * len(Course.course_list),
+            capacity=3
+        )
+
+        # 4.c) Large-exam isolation:
+        #     At most ONE large exam can be running in this room at any time.
+        #     Large exam → demand 1, small exam → demand 0.
+        large_demands = [
+            0 if is_small[e.id] else 1
+            for e in Course.course_list
+        ]
+        model.AddCumulative(
+            intervals=opt_int_per_room[r.id],
+            demands=large_demands,
+            capacity=1
+        )
 
     # (X) Exams in the same room that overlap must start at the same time
-    """ for r in Room.room_list:
+    for r in Room.room_list:
         for i in range(len(Course.course_list)):
             for j in range(i+1, len(Course.course_list)):
                 e = Course.course_list[i]
@@ -574,7 +600,7 @@ def exam_scheduling_main(experiment_no: int,
                     in_room[(e.id, r.id)],
                     in_room[(f.id, r.id)],
                     overlap
-                ]) """
+                ])
 
     # (5) Dept/Year no-overlap
     dept_year_intervals = {}
@@ -1711,11 +1737,11 @@ if __name__ == "__main__":
     course_xlsx = "./data/course_data3.xlsx"
     room_xlsx = "./data/room_data.xlsx"
 
-    """ exam_scheduling_main(experiment,
+    exam_scheduling_main(experiment,
                          is_midterm,
                          num_days,
                          slots_per_day,
-                         3600,
+                         10800,
                          course_xlsx,
-                         room_xlsx) """
-    analysis(experiment - 1, is_midterm, num_days, slots_per_day)
+                         room_xlsx)
+    # analysis(experiment - 1, is_midterm, num_days, slots_per_day)
