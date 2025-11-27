@@ -555,7 +555,7 @@ def exam_scheduling_main(experiment_no: int,
         model.AddCumulative(
             intervals=opt_int_per_room[r.id],
             demands=[1] * len(Course.course_list),
-            capacity=3
+            capacity=2
         )
 
         # 4.c) Large-exam isolation:
