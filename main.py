@@ -168,6 +168,8 @@ class Room:
     ids: np.ndarray
     capacities: np.ndarray
     off_times_dict: dict = None
+    special_ids: list = [int]
+    special_rooms = ["Amfi 4", "Amfi 3", "BB01"]
 
     def __init__(self, id: int, room_code: str, capacity: int, c_type: str, off_times: list[int] = None):
         self.id = int(id)
@@ -176,8 +178,12 @@ class Room:
         self.is_lab = (c_type == "Lab")
         self.off_times = off_times
 
+        if room_code in Room.special_rooms:
+            Room.special_ids.append(self.id)
+
     @staticmethod
     def read_classroom_data(path: str, num_days: int, slots_per_day: int, is_midterm: bool):
+
         df = pd.read_excel(path)
         df = df[df["Room"].notna()][["Room", "Capacity", "Type"]]
 
@@ -706,7 +712,11 @@ def exam_scheduling_main(experiment_no: int,
     for r in Room.room_list:
         for t in TimeSlot.slot_list:
             var = model.NewBoolVar(f"mission_active_r{r.id}_t{t.id}")
-            mission_active[(r.id, t.id)] = var
+
+            if r.id in Room.special_ids:
+                mission_active[(r.id, t.id)] = var * 2
+            else:
+                mission_active[(r.id, t.id)] = var
 
             if r.off_times and t.id in r.off_times:
                 model.Add(var == 0)
@@ -743,7 +753,20 @@ def exam_scheduling_main(experiment_no: int,
     for e in Course.course_list:
         for r in Room.room_list:
             room_usage.append(in_room[(e.id, r.id)])
-    model.Minimize(sum(room_usage) + 2 * total_missions)
+
+    # Weighted mission-active: special rooms cost double
+    weighted_missions = []
+
+    for r in Room.room_list:
+        for t in TimeSlot.slot_list:
+            var = mission_active[(r.id, t.id)]
+
+            if r.id in Room.special_ids:
+                # special rooms count twice
+                weighted_missions.append(2 * var)
+            else:
+                weighted_missions.append(var)
+    model.Minimize(sum(room_usage) + 1 * sum(weighted_missions))
 
     # ---------------------------
     # 2) Solve & Report
@@ -753,7 +776,7 @@ def exam_scheduling_main(experiment_no: int,
     solver.parameters.num_search_workers = 12 # 12, 16
     solver.parameters.log_search_progress = True
     print(f"symmetry: {solver.parameters.symmetry_level}")
-    solver.parameters.symmetry_level = 2 # 3, 2
+    solver.parameters.symmetry_level = 3 # 3, 2
 
     status = solver.Solve(model)
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
@@ -1596,13 +1619,12 @@ def frequency_table(experiment_no: int, exam: str):
 
 
 
-def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day: int):
-    # ... (your existing setup code for reading courses, rooms, etc.)
-    course_xlsx = "./data/course_data.xlsx"
-    room_xlsx = "./data/room_data.xlsx"
-
+def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day: int, course_xlsx, room_xlsx):
     Course.read_courses(course_xlsx, is_midterm)
     Room.read_classroom_data(room_xlsx, num_days, slots_per_day, is_midterm)
+    for r in Room.room_list:
+        print(f"{r.id} - {r.room_code}")
+    return
 
     off_by_day = [[4] for _ in range(num_days)]
     off_by_day[4] = off_by_day[4] + [5]
@@ -1744,4 +1766,4 @@ if __name__ == "__main__":
                          10800,
                          course_xlsx,
                          room_xlsx)
-    # analysis(experiment - 1, is_midterm, num_days, slots_per_day)
+    # analysis(experiment - 1, is_midterm, num_days, slots_per_day, course_xlsx, room_xlsx)
