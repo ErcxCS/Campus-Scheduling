@@ -561,10 +561,10 @@ def exam_scheduling_main(experiment_no: int,
         model.AddCumulative(
             intervals=opt_int_per_room[r.id],
             demands=[1] * len(Course.course_list),
-            capacity=2
+            capacity=1
         )
 
-        # 4.c) Large-exam isolation:
+        """ # 4.c) Large-exam isolation:
         #     At most ONE large exam can be running in this room at any time.
         #     Large exam → demand 1, small exam → demand 0.
         large_demands = [
@@ -575,9 +575,9 @@ def exam_scheduling_main(experiment_no: int,
             intervals=opt_int_per_room[r.id],
             demands=large_demands,
             capacity=1
-        )
+        ) """
 
-    # (X) Exams in the same room that overlap must start at the same time
+    """ # (X) Exams in the same room that overlap must start at the same time
     for r in Room.room_list:
         for i in range(len(Course.course_list)):
             for j in range(i+1, len(Course.course_list)):
@@ -606,7 +606,7 @@ def exam_scheduling_main(experiment_no: int,
                     in_room[(e.id, r.id)],
                     in_room[(f.id, r.id)],
                     overlap
-                ])
+                ]) """
 
     # (5) Dept/Year no-overlap
     dept_year_intervals = {}
@@ -754,7 +754,7 @@ def exam_scheduling_main(experiment_no: int,
         for r in Room.room_list:
             room_usage.append(in_room[(e.id, r.id)])
 
-    # Weighted mission-active: special rooms cost double
+    """ # Weighted mission-active: special rooms cost double
     weighted_missions = []
 
     for r in Room.room_list:
@@ -765,8 +765,9 @@ def exam_scheduling_main(experiment_no: int,
                 # special rooms count twice
                 weighted_missions.append(2 * var)
             else:
-                weighted_missions.append(var)
-    model.Minimize(sum(room_usage) + 1 * sum(weighted_missions))
+                weighted_missions.append(var) """
+    # model.Minimize(sum(room_usage) + 2 * sum(weighted_missions))
+    model.Minimize(sum(room_usage) + 2 * total_missions)
 
     # ---------------------------
     # 2) Solve & Report
@@ -1175,7 +1176,7 @@ def unified_manuel_fac_schedule(dfs: dict[str: pd.DataFrame], course_list: list[
 
 def save_manuel_fac(df, exam):
     df_path = "./data/department_schedules_" + exam
-    fac_xslx_path = os.path.join(df_path, "faculty_schedule_manuel_" + exam + ".xlsx")
+    fac_xslx_path = os.path.join(df_path, "faculty_schedule_manuel_2" + exam + ".xlsx")
     df.to_excel(fac_xslx_path, index=False)
 
 def read_fac_xlsxs(experiment_no: int, exam: str = None):
@@ -1369,7 +1370,7 @@ def automated_df_rebuild(df: pd.DataFrame) -> pd.DataFrame:
     rooms = sorted({room for lst in df["RoomsList"] for room in lst})
 
     # 72 global timeslots (8 days × 9 slots)
-    TOTAL_ROWS = 8 * 9
+    TOTAL_ROWS = 10 * 9 #TODO: Change this dynamically
     timetable = pd.DataFrame("", index=range(1, TOTAL_ROWS + 1), columns=rooms)
 
     # Fix 0-based starting slot
@@ -1622,10 +1623,32 @@ def frequency_table(experiment_no: int, exam: str):
 def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day: int, course_xlsx, room_xlsx):
     Course.read_courses(course_xlsx, is_midterm)
     Room.read_classroom_data(room_xlsx, num_days, slots_per_day, is_midterm)
-    for r in Room.room_list:
-        print(f"{r.id} - {r.room_code}")
-    return
 
+    exam = "midterms" if is_midterm else "finals"
+    fac_df_manuel, fac_df_out = read_fac_xlsxs(experiment_no, exam)
+
+    """ import ast
+
+    # --- 1. Convert stringified lists into real Python lists ---
+    fac_df_manuel["Assigned Rooms"] = fac_df_manuel["Assigned Rooms"].apply(
+        lambda x: ast.literal_eval(x) if isinstance(x, str) else x
+    )
+
+    # --- 2. Build room_code → capacity lookup dictionary ---
+    room_cap_map = {
+        room.room_code.strip(): room.capacity
+        for room in Room.room_list
+    }
+
+    # --- 3. Compute total capacity for each row ---
+    def compute_total_capacity(room_list):
+        if not isinstance(room_list, list):
+            return 0
+        return sum(room_cap_map.get(rc.strip(), 0) for rc in room_list)
+
+    fac_df_manuel["Total Room Cap"] = fac_df_manuel["Assigned Rooms"].apply(compute_total_capacity)
+    save_manuel_fac(fac_df_manuel, exam)
+    return """
     off_by_day = [[4] for _ in range(num_days)]
     off_by_day[4] = off_by_day[4] + [5]
     if num_days >= 10:
@@ -1759,11 +1782,11 @@ if __name__ == "__main__":
     course_xlsx = "./data/course_data3.xlsx"
     room_xlsx = "./data/room_data.xlsx"
 
-    exam_scheduling_main(experiment,
+    """ exam_scheduling_main(experiment,
                          is_midterm,
                          num_days,
                          slots_per_day,
                          10800,
                          course_xlsx,
-                         room_xlsx)
-    # analysis(experiment - 1, is_midterm, num_days, slots_per_day, course_xlsx, room_xlsx)
+                         room_xlsx) """
+    analysis(experiment - 1, is_midterm, num_days, slots_per_day, course_xlsx, room_xlsx)
