@@ -616,7 +616,7 @@ def exam_scheduling_main(experiment_no: int,
                 key = (dep.id)
             else:
                 key = (dep.id, c.year) """
-            key = (dep.id)
+            key = dep.id
             dept_year_intervals.setdefault(key, []).append(interval[c.id])
 
     for intervals in dept_year_intervals.values():
@@ -1791,7 +1791,46 @@ if __name__ == "__main__":
     # analysis(experiment - 1, is_midterm, num_days, slots_per_day, course_xlsx, room_xlsx)
 
     # !! Manual scheduling has the same department, the same year, the same room, the same timslot exams
-    
+    # !! Bazı bölümler seçmeli dersleri çakıştırıyor çünkü 1 tane seçmeli ders seçilebiliyor (makine)
+    # !! Departman içi çakışma olmayınca feasible sonuç çıkmıyor
+    # !! Çünkü örneğin makinenin totalde 38 dersi var
+    # !! final için 8 * 4 (timeslot per day (her sınav 2 saat)) 32
+    # !! 32 < 38 olduğu için feasible solution yok
+    # !! sınav sürelerinin bilinmesi gerek, manuel programda saatler bilindiği için 1 saat verilen çok sınav var
+    # !! belkı zorunlu dersler dep no overlap yapılıp, seçmeliler ise farklı year nooverlap yapılabilir
+    # !! fakat BM için birden fazla seçmeli ders seçilebiliyor dep-year no overlap lazım
+    # !! çünkü fazla seçmeli ders var AKTS farklı derslerle doldurulabiliyor
+    # !! bu iki approach birbiriyle çelişiyor
+    # !! öğrenci bazında data lazım
+    # !! aynı sene içindeki aynı öğrencilerin aldığı dersleri çakıştırmak mı
+    # !! farklı seneler içindeki aynı öğrencilerin aldığı dersleri çakıştırmak mı (alttan almak)
+    # !! Bazı bölümlerin seçmeli ders sayısı ve zorunlu ders sayısı sınırlı olduğu için
+    # !! hepsinin alındığı varsayılabilir, dep/year no overlap daha iyi gibi
+    # !! ama bazı bölümlerinde bazı senelerinde çok seçmeli ders var, hangisinin alındığı belli değil
+    # !! dep year no overlap yapılırsa, feasible sonuç olur, fakat departmanlar sahip oldukları bilgilerden
+    # !! dolayı çakıştırma yapabiliyorlar aynı sene içinde
+    # !! counter intuitive olarak seneler arasında çakıştırma yapmıyorlar
+    # !! öğrenci bazında data lazım, sınav süresi datası lazım, lab mı yazılı mi datası lazım
+    # !! dep/year no overlap çok sakıncalı, teknik olarak feasible solution veriyor ama
+    # !! finaller için problem yaratıyor, teknik olarak ardışık sınıfların zorunlu derslerinin çakışmadığını
+    # !! sadece zorunlu değil seçmeli derslerinde aynı sorunu var
+    # !! dep no overlap lazım, ama tek başına yeterli değil
+    # !! öğrenci datası çok cumbersome
+    # !! tüm sistemin neredeyse değişmesi lazım
+    # !! çok fazla öğreci var problem NP-hard
+    # !! kabul edilebilir bir çözüm çok uzun sürebilir
+    # !! preprocessing çok zahmetli
+    # !! dep no overlap ile same year elective overlap tüm bölümler için applicable değil
+    # !! applicable olanlar için bir dizayn yapılırsa (olan depler için birlikte gruplanması gibi idk) belki
+    # !! sınav süreleri bilinse iyi olurdu özellikle makine için
+    # !! dep no overlap + same year elective group overlap for some dep + sınav süresiz olur mu bi bak
+    # !! ek olarak bağlı derslerin overlap olabiliyor olması çözümü rahatlatabilir
+    # !! ama çok variable eklenmesi gerekebilir (model şişer) çözüm çok yavaşlayabilir
+    # !! farklı dep overlap, görev sayısı objectifini güzel iyileştirip (up to 3 exam per room/slot)
+    # !! ogr count =< ~10 çok ders var
+    # !! manuel schedula timeslotları ekle
+    # !! manuel çakışan ders istatistiklerini incele
+
     """ if is_midterm:
         Course.read_courses(course_xlsx, is_midterm)
         Room.read_classroom_data(room_xlsx, num_days, slots_per_day, is_midterm)
