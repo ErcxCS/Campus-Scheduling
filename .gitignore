@@ -24,8 +24,8 @@ __pycache__/
 *.pyd
 
 # Do not ignore the data folder and its contents
-# !data/
-# !data/**
+!data/
+!data/**
 
 # ignore virtual environment
 env/
