@@ -612,7 +612,11 @@ def exam_scheduling_main(experiment_no: int,
     dept_year_intervals = {}
     for c in Course.course_list:
         for dep in c.departments:
-            key = (dep.id, c.year)
+            """ if not is_midterm:
+                key = (dep.id)
+            else:
+                key = (dep.id, c.year) """
+            key = (dep.id)
             dept_year_intervals.setdefault(key, []).append(interval[c.id])
 
     for intervals in dept_year_intervals.values():
@@ -1074,23 +1078,15 @@ def total_mission_count(df: pd.DataFrame, verbose=0):
 
 
 def read_dfs(experiment_no: int, exam: str = None):
-    runs_path = "./runs"
-    runs = os.listdir(runs_path)
-    run = [r for r in runs if "exp" + str(experiment_no) in r]
-    run = run[0]
-    exp_path = os.path.join(runs_path, run)
-    schedules_folder = "department_schedules"
     if exam:
         schedules_path = "./data/department_schedules_" + exam
-    else:
-        schedules_path = os.path.join(exp_path, schedules_folder)
     
     department_schedules = os.listdir(schedules_path)
-    if "modified" in department_schedules:
-        department_schedules.remove("modified")
-    if "faculty_schedule_manuel.xlsx" in department_schedules:
-        department_schedules.remove("faculty_schedule_manuel.xlsx")
-
+    for file in department_schedules.copy():
+        if len(file.split(" ")) < 2:
+            department_schedules.remove(file)
+    print(department_schedules)
+    print(schedules_path)
     dep_dfs: dict[str: pd.DataFrame] = {}
     for dep in department_schedules:
         dep_word = dep.split(" ")
@@ -1100,11 +1096,11 @@ def read_dfs(experiment_no: int, exam: str = None):
         dep_dfs[dep_code] = df
 
     
-    faculty_xlsx = "faculty_schedule.xlsx"
-    faculty_path = os.path.join(exp_path, faculty_xlsx)
-    fac_df = pd.read_excel(faculty_path, index_col=None, header=0)
+    #faculty_xlsx = "faculty_schedule.xlsx"
+    #faculty_path = os.path.join(exp_path, faculty_xlsx)
+    #fac_df = pd.read_excel(faculty_path, index_col=None, header=0)
 
-    return dep_dfs, fac_df
+    return dep_dfs  # fac_df
 
 
 def save_to(dep: Department, df: pd.DataFrame, exam: str):
@@ -1176,7 +1172,7 @@ def unified_manuel_fac_schedule(dfs: dict[str: pd.DataFrame], course_list: list[
 
 def save_manuel_fac(df, exam):
     df_path = "./data/department_schedules_" + exam
-    fac_xslx_path = os.path.join(df_path, "faculty_schedule_manuel_2" + exam + ".xlsx")
+    fac_xslx_path = os.path.join(df_path, "faculty_schedule_manuel_" + exam + ".xlsx")
     df.to_excel(fac_xslx_path, index=False)
 
 def read_fac_xlsxs(experiment_no: int, exam: str = None):
@@ -1360,7 +1356,7 @@ def compact_columns(df: pd.DataFrame) -> pd.DataFrame:
     return compact_df
 
 
-def automated_df_rebuild(df: pd.DataFrame) -> pd.DataFrame:
+def automated_df_rebuild(df: pd.DataFrame, slot_per_day) -> pd.DataFrame:
     import pandas as pd
 
     # Parse Assigned Rooms string → list
@@ -1370,7 +1366,7 @@ def automated_df_rebuild(df: pd.DataFrame) -> pd.DataFrame:
     rooms = sorted({room for lst in df["RoomsList"] for room in lst})
 
     # 72 global timeslots (8 days × 9 slots)
-    TOTAL_ROWS = 10 * 9 #TODO: Change this dynamically
+    TOTAL_ROWS = num_days * 9 #TODO: Change this dynamically
     timetable = pd.DataFrame("", index=range(1, TOTAL_ROWS + 1), columns=rooms)
 
     # Fix 0-based starting slot
@@ -1404,7 +1400,7 @@ def automated_df_rebuild(df: pd.DataFrame) -> pd.DataFrame:
     return flat
 
 
-def frequency_table(experiment_no: int, exam: str):
+def frequency_table(experiment_no: int, exam: str, num_days):
     import os
     import pandas as pd
     import matplotlib.pyplot as plt
@@ -1425,7 +1421,7 @@ def frequency_table(experiment_no: int, exam: str):
     automated_path = os.path.join(exp_path, automated_xlsx)
     automated_df = pd.read_excel(automated_path, index_col=None, header=0)
 
-    final_automated_df = automated_df_rebuild(automated_df)
+    final_automated_df = automated_df_rebuild(automated_df, num_days)
     final_automated_df.to_excel("faculty_schedule_automated_finals.xlsx")
 
     # --- Sort automated timetable like manual ---
@@ -1627,16 +1623,18 @@ def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day:
     exam = "midterms" if is_midterm else "finals"
     fac_df_manuel, fac_df_out = read_fac_xlsxs(experiment_no, exam)
 
-    """ import ast
-
+    import ast
+    # TODO: TRS dersleri
+    # TODO: Re run this for both finals and midterms with last year data
     # --- 1. Convert stringified lists into real Python lists ---
     fac_df_manuel["Assigned Rooms"] = fac_df_manuel["Assigned Rooms"].apply(
         lambda x: ast.literal_eval(x) if isinstance(x, str) else x
     )
 
+    # make sure capcities are halved
     # --- 2. Build room_code → capacity lookup dictionary ---
     room_cap_map = {
-        room.room_code.strip(): room.capacity
+        room.room_code.strip(): room.capacity if room.is_lab else room.capacity // 2
         for room in Room.room_list
     }
 
@@ -1648,7 +1646,7 @@ def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day:
 
     fac_df_manuel["Total Room Cap"] = fac_df_manuel["Assigned Rooms"].apply(compute_total_capacity)
     save_manuel_fac(fac_df_manuel, exam)
-    return """
+    return
     off_by_day = [[4] for _ in range(num_days)]
     off_by_day[4] = off_by_day[4] + [5]
     if num_days >= 10:
@@ -1659,7 +1657,7 @@ def analysis(experiment_no: int, is_midterm: bool, num_days: int, slots_per_day:
 
     exam = "midterms" if is_midterm else "finals"
     fac_df_manuel, fac_df_out = read_fac_xlsxs(experiment_no, exam)
-    #frequency_table(experiment_no, exam)
+    #frequency_table(experiment_no, exam, num_days)
 
     print(f"Manual Schedule Entries: {len(fac_df_manuel)}, Automated Schedule Entries: {len(fac_df_out)}")
     print("-" * 30)
@@ -1775,18 +1773,35 @@ if __name__ == "__main__":
     np.random.seed(seed)
     random.seed(seed)
 
-    is_midterm = False
-    num_days = 10 if is_midterm else 9  # midterm:10, final:8
+    is_midterm = True
+    num_days = 10 if is_midterm else 8  # midterm:10, final:8, 9 for final this year
     slots_per_day = 9
 
-    course_xlsx = "./data/course_data3.xlsx"
+    # course_data: 24B, course_data3: 25G
+    course_xlsx = "./data/course_data.xlsx"
     room_xlsx = "./data/room_data.xlsx"
 
-    """ exam_scheduling_main(experiment,
+    exam_scheduling_main(experiment,
                          is_midterm,
                          num_days,
                          slots_per_day,
                          10800,
                          course_xlsx,
-                         room_xlsx) """
-    analysis(experiment - 1, is_midterm, num_days, slots_per_day, course_xlsx, room_xlsx)
+                         room_xlsx)
+    # analysis(experiment - 1, is_midterm, num_days, slots_per_day, course_xlsx, room_xlsx)
+
+    # !! Manual scheduling has the same department, the same year, the same room, the same timslot exams
+    
+    """ if is_midterm:
+        Course.read_courses(course_xlsx, is_midterm)
+        Room.read_classroom_data(room_xlsx, num_days, slots_per_day, is_midterm)
+
+        dfs = read_dfs(experiment - 1, "midterms")
+        fac_df_manuel_midterm = unified_manuel_fac_schedule(dfs, Course.course_list)
+        save_manuel_fac(fac_df_manuel_midterm, "midterms")
+    else:
+        Course.read_courses(course_xlsx, is_midterm)
+        Room.read_classroom_data(room_xlsx, num_days, slots_per_day, is_midterm)
+        dfs = read_dfs(experiment - 1, "finals")
+        fac_df_manuel_final = unified_manuel_fac_schedule(dfs, Course.course_list)
+        save_manuel_fac(fac_df_manuel_final, "finals") """
