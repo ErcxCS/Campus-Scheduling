@@ -616,7 +616,8 @@ def exam_scheduling_main(experiment_no: int,
                 key = (dep.id)
             else:
                 key = (dep.id, c.year) """
-            key = dep.id
+            
+            key = (dep.id, c.year)
             dept_year_intervals.setdefault(key, []).append(interval[c.id])
 
     for intervals in dept_year_intervals.values():
@@ -1773,7 +1774,7 @@ if __name__ == "__main__":
     np.random.seed(seed)
     random.seed(seed)
 
-    is_midterm = True
+    is_midterm = False
     num_days = 10 if is_midterm else 8  # midterm:10, final:8, 9 for final this year
     slots_per_day = 9
 
@@ -1785,7 +1786,7 @@ if __name__ == "__main__":
                          is_midterm,
                          num_days,
                          slots_per_day,
-                         10800,
+                         600,
                          course_xlsx,
                          room_xlsx)
     # analysis(experiment - 1, is_midterm, num_days, slots_per_day, course_xlsx, room_xlsx)
