@@ -55,7 +55,8 @@ def load_demo_hints(path, model, start_vars, in_room_vars):
 
 def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int,
                          slots_per_day: int, timeout: int = 600,
-                         runs_path: str = "./runs", demo_mode: bool = False):
+                         runs_path: str = "./runs", demo_mode: bool = False,
+                         dataset_name: str = "B24"):
 
     horizon = num_days * slots_per_day
     model = cp_model.CpModel()
@@ -274,7 +275,9 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int,
 
     model.Minimize(sum(room_usage))  # + 2 * total_missions)
 
-    demo_filename = "demo_midterm.json" if is_midterm else "demo_final.json"
+    exam_type_str = "midterm" if is_midterm else "final"
+    demo_filename = f"demo_{exam_type_str}_{dataset_name}.json"
+    
     if demo_mode:
         print("Loading variables...")
         success = load_demo_hints(demo_filename, model, start, in_room)
@@ -283,7 +286,7 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int,
             print("Fallback: Running normal optimization (File missing).")
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 120 if demo_mode and success else timeout
+    solver.parameters.max_time_in_seconds = 30 if demo_mode and success else timeout
     solver.parameters.num_search_workers = 12
     solver.parameters.log_search_progress = True
     solver.parameters.symmetry_level = 3
