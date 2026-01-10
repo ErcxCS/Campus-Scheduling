@@ -43,6 +43,8 @@ if __name__ == "__main__":
         num_days = args.num_days
     else:
         num_days = 10 if is_midterm else 8
+        if args.G25 is not None and not is_midterm:
+            num_days = 9
         
     slots_per_day = 9
 
@@ -68,19 +70,15 @@ if __name__ == "__main__":
     Course.read_courses(course_xlsx, is_midterm)
     Room.read_classroom_data(room_xlsx, num_days, slots_per_day, is_midterm)
 
-    # Define Off-time per day (e.g., lunch)
-    # Using safe index checks in case num_days is unusually small
     off_by_day = [[4] for _ in range(num_days)]
-    
     if num_days > 4:
         off_by_day[4] = off_by_day[4] + [5]
     if num_days >= 10:
-        # Only add to index 9 if we actually have at least 10 days
         if 9 < num_days:
             off_by_day[9] = off_by_day[9] + [5]
             
-    if num_days > 0 and not is_midterm:
-        off_by_day[0] = off_by_day[0] + [5, 6]  # simulations of 5i exams
+    """ if num_days > 0 and not is_midterm:
+        off_by_day[0] = off_by_day[0] + [5, 6]  # simulations of 5i exams """
 
     TimeSlot.generate_week(num_days, slots_per_day, off_by_day)
 

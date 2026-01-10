@@ -4,6 +4,13 @@ An automated constraint programming solution for university exam timetabling. Th
 
 ## Installation
 
+0. **Get the Code (Demo Branch)**:
+   ```bash
+   git clone https://github.com/ErcxCS/Campus-Scheduling.git
+   cd Campus-Scheduling
+   git checkout demo
+   ```
+
 1. **Prerequisites**: Ensure you have Python 3.8+ installed.
 2. **Create a Virtual Environment** (Recommended):
    ```bash
@@ -59,7 +66,15 @@ Runs optimization for 10 minutes (default) and generates a schedule.
 python main.py
 ```
 
-### 2. Midterm Demo (Fast Presentation Mode)
+### 2. Final Demo 
+
+Uses cached hints to generate a valid midterm schedule in ~10-30 seconds.
+
+```bash
+python main.py --demo
+```
+
+### 3. Midterm Demo
 
 Uses cached hints to generate a valid midterm schedule in ~10-30 seconds.
 
@@ -67,7 +82,7 @@ Uses cached hints to generate a valid midterm schedule in ~10-30 seconds.
 python main.py --midterm --demo
 ```
 
-### 3. Run with New G25 Data
+### 4. Run with New G25 Data
 
 Generates a schedule using the G25 course data (Analysis skipped).
 
@@ -75,7 +90,7 @@ Generates a schedule using the G25 course data (Analysis skipped).
 python main.py --G25
 ```
 
-### 4. Re-Analyze an Old Experiment
+### 5. Re-Analyze an Old Experiment
 
 Regenerates the graphs and reports for experiment #3 (Finals) without running the solver again.
 

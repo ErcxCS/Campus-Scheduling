@@ -3,7 +3,6 @@ import datetime
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
-# Updated imports
 from entities import Room, Course
 from utils import read_dfs
 
@@ -260,6 +259,10 @@ def unified_manuel_fac_schedule(dfs: dict, course_list: list):
 
         deps = course.get_dep_shorts().split(" ")
         deps = ",".join(deps)
+        
+        # CHANGED: Join the list into a single comma-separated string
+        assigned_rooms_str = ",".join([room.room_code for room in used_rooms])
+
         data.append({
             'Departments': deps,
             'Year': course.year,
@@ -267,7 +270,7 @@ def unified_manuel_fac_schedule(dfs: dict, course_list: list):
             'Course Name': course.course_name,
             'Day': date_info[0],
             'Slot': slot_info[0],
-            'Assigned Rooms': [room.room_code for room in used_rooms],
+            'Assigned Rooms': assigned_rooms_str, # Now matches faculty_exam_schedule format
             'Num Rooms Used': len(used_rooms),
             'Total Room Cap': sum([room.capacity if room.is_lab else room.capacity // 2 for room in used_rooms]),
             "Num Students": course.n_students

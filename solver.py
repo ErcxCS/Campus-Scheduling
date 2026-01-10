@@ -3,7 +3,7 @@ import os
 from entities import Course, Room, Department, TimeSlot
 from utils import get_off_chunks
 from reports import build_timetable, department_exam_schedule, faculty_exam_schedule, excelify
-from analytics import analysis
+from analytics import mission_report
 import json
 
 
@@ -126,6 +126,7 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int,
             capacity=1
         )
 
+    # Not needed when simultaneous exam capacity is 1
     """ # (5) Exams in the same room that overlap must start at the same time
     for r in Room.room_list:
         for i in range(len(Course.course_list)):
@@ -245,39 +246,43 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int,
                 model.Add(count_vars[(dep.id, year, d)] >= low)
                 model.Add(count_vars[(dep.id, year, d)] <= high)
 
-    """ # (12) Mission Active vars
-    mission_active = {}
-    for r in Room.room_list:
-        for t in TimeSlot.slot_list:
-            var = model.NewBoolVar(f"mission_active_r{r.id}_t{t.id}")
-            mission_active[(r.id, t.id)] = var * 2 if r.id in Room.special_ids else var
+    if not demo_mode:
+        # (12) Mission Active vars
+        mission_active = {}
+        for r in Room.room_list:
+            for t in TimeSlot.slot_list:
+                var = model.NewBoolVar(f"mission_active_r{r.id}_t{t.id}")
+                mission_active[(r.id, t.id)] = var * 2 if r.id in Room.special_ids else var
 
-            if r.off_times and t.id in r.off_times:
-                model.Add(var == 0)
+                if r.off_times and t.id in r.off_times:
+                    model.Add(var == 0)
 
-            active_list = []
-            for e in Course.course_list:
-                b_start = model.NewBoolVar(f"bstart_e{e.id}_{r.id}_before_{t.id}")
-                b_end = model.NewBoolVar(f"bend_e{e.id}_{r.id}_after_{t.id}")
-                model.Add(start[e.id] <= t.id).OnlyEnforceIf(b_start)
-                model.Add(start[e.id] > t.id).OnlyEnforceIf(b_start.Not())
-                model.Add(end[e.id] > t.id).OnlyEnforceIf(b_end)
-                model.Add(end[e.id] <= t.id).OnlyEnforceIf(b_end.Not())
+                active_list = []
+                for e in Course.course_list:
+                    b_start = model.NewBoolVar(f"bstart_e{e.id}_{r.id}_before_{t.id}")
+                    b_end = model.NewBoolVar(f"bend_e{e.id}_{r.id}_after_{t.id}")
+                    model.Add(start[e.id] <= t.id).OnlyEnforceIf(b_start)
+                    model.Add(start[e.id] > t.id).OnlyEnforceIf(b_start.Not())
+                    model.Add(end[e.id] > t.id).OnlyEnforceIf(b_end)
+                    model.Add(end[e.id] <= t.id).OnlyEnforceIf(b_end.Not())
 
-                active = model.NewBoolVar(f"active_e{e.id}_r{r.id}_t{t.id}")
-                model.AddBoolAnd([in_room[(e.id, r.id)], b_start, b_end]).OnlyEnforceIf(active)
-                model.AddBoolOr([in_room[(e.id, r.id)].Not(), b_start.Not(), b_end.Not()]).OnlyEnforceIf(active.Not())
-                active_list.append(active)
-            model.AddMaxEquality(var, active_list)
+                    active = model.NewBoolVar(f"active_e{e.id}_r{r.id}_t{t.id}")
+                    model.AddBoolAnd([in_room[(e.id, r.id)], b_start, b_end]).OnlyEnforceIf(active)
+                    model.AddBoolOr([in_room[(e.id, r.id)].Not(), b_start.Not(), b_end.Not()]).OnlyEnforceIf(active.Not())
+                    active_list.append(active)
+                model.AddMaxEquality(var, active_list)
 
-    total_missions = sum(mission_active.values()) """
-    room_usage = [in_room[(e.id, r.id)] for e in Course.course_list for r in Room.room_list]
+        total_missions = sum(mission_active.values())
+        room_usage = [in_room[(e.id, r.id)] for e in Course.course_list for r in Room.room_list]
 
-    model.Minimize(sum(room_usage))  # + 2 * total_missions)
+        model.Minimize(sum(room_usage) + 2 * total_missions)
+    else:
+        room_usage = [in_room[(e.id, r.id)] for e in Course.course_list for r in Room.room_list]
+        model.Minimize(sum(room_usage))
 
     exam_type_str = "midterm" if is_midterm else "final"
     demo_filename = f"demo_{exam_type_str}_{dataset_name}.json"
-    
+
     if demo_mode:
         print("Loading variables...")
         success = load_demo_hints(demo_filename, model, start, in_room)
