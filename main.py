@@ -14,6 +14,7 @@ def parse_arguments():
     parser.add_argument('--timeout', type=int, default=600, help='Solver timeout in seconds (Default: 600)')
     parser.add_argument('--seed', type=int, default=None, help='Random seed for reproducibility')
     parser.add_argument('--analyze', type=int, help='Skip solving and analyze a specific experiment ID')
+    parser.add_argument('--G25', action='store_true', help='Use G25 course data (Default: B24)')
 
     return parser.parse_args()
 
@@ -39,14 +40,21 @@ if __name__ == "__main__":
     num_days = 10 if is_midterm else 8
     slots_per_day = 9
 
+    if args.G25:
+        course_xlsx = "./data/course_data_G25.xlsx"
+        dataset_name = "G25"
+    else:
+        course_xlsx = "./data/course_data_B24.xlsx"
+        dataset_name = "B24"
+
     print(f"--- CONFIGURATION ---")
     print(f"Exam Type: {'Midterm' if is_midterm else 'Final'}")
-    print(f"Mode: {'DEMO (Warm Start)' if is_demo else 'OPTIMIZATION (Cold Start)'}")
-    print(f"Timeout: {timeout} seconds")
+    print(f"Dataset:   {dataset_name}")
+    print(f"Mode:      {'DEMO (Warm Start)' if is_demo else 'OPTIMIZATION (Cold Start)'}")
+    print(f"Timeout:   {timeout} seconds")
     print(f"Experiment ID: {experiment}")
-    print(f"---------------------")
+    print(f"---------------------") 
 
-    course_xlsx = "./data/course_data_B24.xlsx"
     room_xlsx = "./data/room_data.xlsx"
 
     # Initialize Data
@@ -65,7 +73,12 @@ if __name__ == "__main__":
 
     if args.analyze is None:
         exam_scheduling_main(experiment, is_midterm, num_days, slots_per_day, timeout, runs_path, is_demo)
-        analysis(experiment, is_midterm, num_days)
+        if not args.G25:
+            analysis(experiment, is_midterm, num_days)
+        else:
+            print("Cannot analyze G25 dataset (No comparison data available).")
     else:
-
-        analysis(experiment, is_midterm, num_days)
+        if not args.G25:
+            analysis(experiment, is_midterm, num_days)
+        else:
+            print("Cannot analyze G25 dataset (No comparison data available).")

@@ -37,3 +37,6 @@ env/**
 
 # don't ignore demo variables
 !*.json
+
+# don't ignore readme
+!*.md
