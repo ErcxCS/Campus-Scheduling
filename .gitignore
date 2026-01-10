@@ -34,3 +34,6 @@ env/**
 # ignore experiments?
 !runs/
 !runs/**
+
+# don't ignore demo variables
+!*.json
