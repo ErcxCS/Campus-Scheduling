@@ -62,7 +62,7 @@ class Course:
         self.requires_lab = requires_lab
         self.year = year
         self.course_name = course_name
-        self.mandatory = mandatory
+        self.mandatory = True if mandatory == "Z" else False
 
         self.dep_short = ' '.join(dep.short for dep in self.departments)
         self.blocks = [2]
@@ -76,9 +76,19 @@ class Course:
     @staticmethod
     def read_courses(path: str, is_midterm: bool):
         df = pd.read_excel(path, index_col=None, header=0)
-        for i, row in enumerate(df.values):
-            (department_name, course_code, course_name, year, mandatory,
-             instructor_id, n_students, requires_lab) = row
+        
+        # Use iterrows() instead of df.values
+        for index, row in df.iterrows():
+            department_name = row["DepartmentName"]
+            course_code = row["CourseCode"]
+            course_name = row["CourseName"]
+            akts = row["AKTS"]
+            credit = row["KREDI"]
+            requires_lab = row["Lab"]
+            year = row["SINIF"]
+            mandatory = row["ZOR_SEC"]
+            instructor_id = row["InstructorUserId"]
+            n_students = row["OgrenciSayisi"]
 
             if is_midterm and course_code in Course.pass_course_midterm:
                 continue
@@ -94,7 +104,7 @@ class Course:
                 dep.add_course(existing)
             else:
                 new_course = Course(
-                    id=i, department=dep, course_name=course_name, year=int(year),
+                    id=index, department=dep, course_name=course_name, year=int(year),
                     n_students=int(n_students), course_code=course_code,
                     instructor_id=inst_id, requires_lab=(requires_lab == 1),
                     mandatory=mandatory

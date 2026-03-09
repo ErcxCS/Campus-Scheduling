@@ -1010,7 +1010,7 @@ def merge_dfs(fac_df_manuel: pd.DataFrame, fac_df_out: pd.DataFrame, path) -> pd
     return merged
 
 
-def analysis(experiment_no: int, is_midterm: bool, num_days: int):
+def analysis(experiment_no: int, is_midterm: bool, num_days: int, dataset: str):
     # Setup Paths
     exam = "midterms" if is_midterm else "finals"
     exp_path = f"./runs/exp{experiment_no}_{exam[:-1]}"
@@ -1018,7 +1018,7 @@ def analysis(experiment_no: int, is_midterm: bool, num_days: int):
     os.makedirs(plots_path, exist_ok=True)
 
     # 1. Load Raw Data & Create Merge
-    fac_df_manuel, fac_df_out = read_fac_xlsxs(experiment_no, exam)
+    fac_df_manuel, fac_df_out = read_fac_xlsxs(experiment_no, exam, dataset)
     
     faculty_xlsx = "faculty_schedule2.xlsx"
     faculty_path = os.path.join(exp_path, faculty_xlsx)

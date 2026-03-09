@@ -66,7 +66,7 @@ def read_dfs(schedules_path):
         dep_dfs[dep_code] = df
     return dep_dfs
 
-def read_fac_xlsxs(experiment_no: int, exam: str = None):
+def read_fac_xlsxs(experiment_no: int, exam: str = None, dataset: str = "B24"):
     exp_path = f"./runs/exp{experiment_no}_{exam[:-1]}"
     
     faculty_xlsx = "faculty_schedule.xlsx"

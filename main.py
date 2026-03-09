@@ -15,6 +15,8 @@ def parse_arguments():
     parser.add_argument('--seed', type=int, default=None, help='Random seed for reproducibility')
     parser.add_argument('--analyze', type=int, help='Skip solving and analyze a specific experiment ID')
     parser.add_argument('--G25', action='store_true', help='Use G25 course data (Default: B24)')
+    parser.add_argument('--faculty', type=int, choices=[1, 2], default=1,
+                        help='Faculty selection: 1 = B24/G25 (default), 2 = UBF')
     parser.add_argument('--num_days', type=int, default=None, help='Override schedule duration in days (Default: 10 for Midterms, 8 for Finals)')
 
     return parser.parse_args()
@@ -48,12 +50,17 @@ if __name__ == "__main__":
         
     slots_per_day = 9
 
-    if args.G25:
-        course_xlsx = "./data/course_data_G25.xlsx"
-        dataset_name = "G25"
+    # Allow selecting faculty-specific dataset (UBF) with --faculty 2
+    if args.faculty == 2:
+        course_xlsx = "./data/UBF_course_data.xlsx"
+        dataset_name = "UBF"
     else:
-        course_xlsx = "./data/course_data_B24.xlsx"
-        dataset_name = "B24"
+        if args.G25:
+            course_xlsx = "./data/course_data_G25.xlsx"
+            dataset_name = "G25"
+        else:
+            course_xlsx = "./data/course_data_B24.xlsx"
+            dataset_name = "B24"
 
     print(f"--- CONFIGURATION ---")
     print(f"Exam Type: {'Midterm' if is_midterm else 'Final'}")
@@ -64,7 +71,10 @@ if __name__ == "__main__":
     print(f"Experiment ID: {experiment}")
     print(f"---------------------") 
 
-    room_xlsx = "./data/room_data.xlsx"
+    if dataset_name == "UBF":
+        room_xlsx = "./data/UBF_room_data.xlsx"
+    else:
+        room_xlsx = "./data/room_data.xlsx"
 
     # Initialize Data
     Course.read_courses(course_xlsx, is_midterm)
@@ -81,15 +91,16 @@ if __name__ == "__main__":
         off_by_day[0] = off_by_day[0] + [5, 6]  # simulations of 5i exams """
 
     TimeSlot.generate_week(num_days, slots_per_day, off_by_day)
+    
 
     if args.analyze is None:
         exam_scheduling_main(experiment, is_midterm, num_days, slots_per_day, timeout, runs_path, is_demo, dataset_name)
         if not args.G25:
-            analysis(experiment, is_midterm, num_days)
+            analysis(experiment, is_midterm, num_days, dataset_name)
         else:
             print("Skipping analysis (G25 selected).")
     else:
         if not args.G25:
-            analysis(experiment, is_midterm, num_days)
+            analysis(experiment, is_midterm, num_days, dataset_name)
         else:
             print("Cannot analyze G25 dataset (No comparison data available).")

@@ -1,3 +1,5 @@
+from xml.parsers.expat import model
+
 from ortools.sat.python import cp_model
 import os
 from entities import Course, Room, Department, TimeSlot
@@ -123,7 +125,7 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int,
         model.AddCumulative(
             intervals=opt_int_per_room[r.id],
             demands=[1] * len(Course.course_list),
-            capacity=1
+            capacity=2
         )
 
     # Not needed when simultaneous exam capacity is 1
@@ -167,6 +169,19 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int,
 
     for intervals in dept_year_intervals.values():
         model.AddNoOverlap(intervals)
+    
+    # (6.1) Mandatory exams in the same department cannot overlap
+    mandatory_dep_intervals = {}
+    for c in Course.course_list:
+        if not c.mandatory:
+            continue
+        for dep in c.departments:
+            key = dep.id
+            mandatory_dep_intervals.setdefault(key, []).append(interval[c.id])
+
+    for intervals in mandatory_dep_intervals.values():
+        if len(intervals) > 1:
+            model.AddNoOverlap(intervals)
 
     # (7) Lab vs non-lab enforcement
     for e in Course.course_list:
@@ -246,6 +261,62 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int,
                 model.Add(count_vars[(dep.id, year, d)] >= low)
                 model.Add(count_vars[(dep.id, year, d)] <= high)
 
+    """ # (11) Balanced exam-per-department constraints (SOFT, overload only)
+    local_day = {}
+    if is_midterm:
+        week_len = num_days // 2
+        for e in Course.course_list:
+            local_day[e.id] = model.NewIntVar(0, week_len - 1, f"local_day_e{e.id}")
+            if e.year in {1, 3}:
+                model.AddDivisionEquality(local_day[e.id], start[e.id], slots_per_day)
+            else:
+                dur = e.get_duration()
+                shifted_start = model.NewIntVar(
+                    0,
+                    horizon - slots_per_day * week_len - dur,
+                    f"shifted_start_{e.id}"
+                )
+                model.Add(shifted_start == start[e.id] - slots_per_day * week_len)
+                model.AddDivisionEquality(local_day[e.id], shifted_start, slots_per_day)
+    else:
+        week_len = num_days
+        for e in Course.course_list:
+            local_day[e.id] = model.NewIntVar(0, week_len - 1, f"local_day_e{e.id}")
+            model.AddDivisionEquality(local_day[e.id], start[e.id], slots_per_day)
+
+    count_vars = {}
+    for dep in Department.departments:
+        for year, exams in dep.curriculums.items():
+            for d in range(week_len):
+                count_vars[(dep.id, year, d)] = model.NewIntVar(
+                    0, len(exams), f"count_dep{dep.id}_yr{year}_d{d}"
+                )
+                indicators = []
+                for e in exams:
+                    ind = model.NewBoolVar(f"ind_e{e.id}_d{d}")
+                    model.Add(local_day[e.id] == d).OnlyEnforceIf(ind)
+                    model.Add(local_day[e.id] != d).OnlyEnforceIf(ind.Not())
+                    indicators.append(ind)
+                model.Add(count_vars[(dep.id, year, d)] == sum(indicators))
+
+    # Soft penalties: discourage too many exams on the same day
+    overload_penalties = []
+
+    for dep in Department.departments:
+        for year, exams in dep.curriculums.items():
+            n = len(exams)
+            if n == 0:
+                continue
+
+            base = n // week_len
+            cap = base + 1
+
+            for d in range(week_len):
+                overload = model.NewIntVar(0, n, f"over_dep{dep.id}_yr{year}_d{d}")
+                model.Add(overload >= count_vars[(dep.id, year, d)] - cap)
+                model.Add(overload >= 0)
+                overload_penalties.append(overload) """
+
     if not demo_mode:
         # (12) Mission Active vars
         mission_active = {}
@@ -275,6 +346,8 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int,
         total_missions = sum(mission_active.values())
         room_usage = [in_room[(e.id, r.id)] for e in Course.course_list for r in Room.room_list]
 
+        balance_weight = 2
+        #model.Minimize(sum(room_usage) + 2 * total_missions + balance_weight * sum(overload_penalties))
         model.Minimize(sum(room_usage) + 2 * total_missions)
     else:
         room_usage = [in_room[(e.id, r.id)] for e in Course.course_list for r in Room.room_list]
