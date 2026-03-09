@@ -150,6 +150,9 @@ class Room:
     off_times_dict: dict = None
     special_ids: list = [int]
     special_rooms = ["Amfi 4", "Amfi 3", "BB01"]
+    faculties = set()
+    rooms_by_fac = dict()
+    min_capacity = None
 
     def __init__(self, id: int, room_code: str, capacity: int, c_type: str, off_times: list = None):
         self.id = int(id)
@@ -157,6 +160,7 @@ class Room:
         self.room_code = room_code
         self.is_lab = (c_type == "Lab")
         self.off_times = off_times
+        self.faculty = room_code.split(sep="-")[0].strip()
 
         if room_code in Room.special_rooms:
             Room.special_ids.append(self.id)
@@ -192,7 +196,9 @@ class Room:
                 labs.append(room_obj)
             else:
                 regulars.append(room_obj)
-
+            
+            Room.faculties.add(room_obj.faculty)
+        
         Room.room_list = regulars + labs
         Room.ids = np.array(room_ids)
         Room.capacities = np.array(room_caps)
@@ -201,6 +207,11 @@ class Room:
             "room_codes": room_codes,
             "capacities": room_caps
         })
+
+        Room.rooms_by_fac = {fac: [] for fac in Room.faculties}
+        Room.min_capacity = min(Room.capacities)
+        for room in Room.room_list:
+            Room.rooms_by_fac[room.faculty].append(room)
 
     @staticmethod
     def find_by_code(room_code: str):

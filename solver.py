@@ -96,11 +96,24 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int,
             in_room[(e.id, r.id)] = model.NewBoolVar(f"in_room_e{e.id}_r{r.id}")
             model.Add(seat[(e.id, r.id)] <= cap * in_room[(e.id, r.id)])
 
+    use_fac = {}
+    for e in Course.course_list:
+        for f in Room.faculties:
+            var = model.NewBoolVar(f"use_fac_e{e.id}_f{f}")
+            use_fac[(e.id, f)] = var
+        model.Add(sum(use_fac[(e.id, f)] for f in Room.faculties) == 1)
+
+        for f in Room.faculties:
+            for r in Room.rooms_by_fac[f]:
+                model.Add(in_room[(e.id, r.id)] <= use_fac[(e.id, f)])
+
     # (3) Full-seat constraint
     for e in Course.course_list:
         model.Add(sum(seat[(e.id, r.id)] for r in Room.room_list) == e.n_students)
 
     # (4) Optional intervals + room-level capacity
+    SMALL_EXAM_THRESHOLD = Room.min_capacity // 2
+    
     opt_int_per_room = {r.id: [] for r in Room.room_list}
     for e in Course.course_list:
         for r in Room.room_list:
@@ -126,6 +139,17 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int,
             intervals=opt_int_per_room[r.id],
             demands=[1] * len(Course.course_list),
             capacity=2
+        )
+        # NEW: forbid two NON-SMALL exams overlapping in the same room
+        # big demand = 1, small demand = 0
+        big_demands = [
+            1 if e.n_students > SMALL_EXAM_THRESHOLD else 0
+            for e in Course.course_list
+        ]
+        model.AddCumulative(
+            intervals=opt_int_per_room[r.id],
+            demands=big_demands,
+            capacity=1
         )
 
     # Not needed when simultaneous exam capacity is 1

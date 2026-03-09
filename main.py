@@ -62,14 +62,6 @@ if __name__ == "__main__":
             course_xlsx = "./data/course_data_B24.xlsx"
             dataset_name = "B24"
 
-    print(f"--- CONFIGURATION ---")
-    print(f"Exam Type: {'Midterm' if is_midterm else 'Final'}")
-    print(f"Dataset:   {dataset_name}")
-    print(f"Mode:      {'DEMO (Warm Start)' if is_demo else 'OPTIMIZATION (Cold Start)'}")
-    print(f"Duration:  {num_days} days")
-    print(f"Timeout:   {timeout} seconds")
-    print(f"Experiment ID: {experiment}")
-    print(f"---------------------") 
 
     if dataset_name == "UBF":
         room_xlsx = "./data/UBF_room_data.xlsx"
@@ -79,6 +71,17 @@ if __name__ == "__main__":
     # Initialize Data
     Course.read_courses(course_xlsx, is_midterm)
     Room.read_classroom_data(room_xlsx, num_days, slots_per_day, is_midterm)
+
+    print(f"--- CONFIGURATION ---")
+    print(f"Exam Type: {'Midterm' if is_midterm else 'Final'}")
+    print(f"Dataset:   {dataset_name}")
+    print(f"Mode:      {'DEMO (Warm Start)' if is_demo else 'OPTIMIZATION (Cold Start)'}")
+    print(f"Duration:  {num_days} days")
+    print(f"Timeout:   {timeout} seconds")
+    print(f"Experiment ID: {experiment}")
+    print(f"Num courses: {len(Course.course_list)}")
+    print(f"Num rooms: {len(Room.room_list)}")
+    print(f"---------------------") 
 
     off_by_day = [[4] for _ in range(num_days)]
     if num_days > 4:
