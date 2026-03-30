@@ -28,81 +28,101 @@ An automated constraint programming solution for university exam timetabling. Th
 
 ## How to Run
 
-The system is controlled via the command line using `main.py`.
-
-### Basic Syntax
+The system is controlled via the command line:
 
 ```bash
-python main.py [arguments]
+python -m src.main [arguments]
 ```
 
-### Arguments Explanation
+### Arguments
 
 | Argument | Description |
 |---|---|
-| *(No Argument)* | Runs a standard Final Exam optimization (8 days) using the default B24 dataset. |
-| `--midterm` | Switches the mode to Midterm Exams (10 days). Default is Finals. |
-| `--demo` | Demo Mode: Uses a pre-calculated solution ("warm start") to finish in seconds. Useful for presentations. |
-| `--G25` | Switches the input dataset to G25 (Fall 2025 data). Note: Post-run analysis is disabled for this dataset. |
-| `--timeout N` | Sets the solver time limit in seconds (Default: 600). |
+| *(No Argument)* | Runs a standard Final Exam optimization for Engineering faculty, B24 semester (8 days, 600s timeout). |
+| `--faculty {eng,ubf}` | Select faculty (default: `eng`). |
+| `--semester {B24,G25}` | Select semester dataset (default: `B24`). |
+| `--midterm` | Switches the mode to Midterm Exams. Default is Finals. |
+| `--demo` | Demo Mode: Uses a pre-calculated solution ("warm start") to finish in seconds. |
+| `--timeout N` | Sets the solver time limit in seconds (default: 600). |
 | `--seed N` | Sets a random seed for reproducibility. |
-| `--num_days N` | Set the number of days, by default if for final 8, if midterm 10. |
-| `--analyze ID` | Skips the solver and runs the analysis suite on a specific Experiment ID (e.g., `--analyze 5`). |
+| `--num-days N` | Override schedule duration in days. |
+| `--analyze ID` | Skips the solver and runs the analysis suite on a specific Experiment ID. |
+| `--name NAME` | Custom experiment name (default: auto-increment). |
 
 ## Important Note on Analysis
 
-The Analysis Module (graphs, heatmaps, and comparison reports) is strictly calibrated for the B24 (Spring 2024) dataset.
+The Analysis Module (graphs, heatmaps, and comparison reports) requires manual reference schedules for comparison. Analysis runs automatically when reference data exists for the selected faculty/semester combination.
 
-- **B24 Runs**: Analysis runs automatically after the solver finishes.
-- **G25 Runs**: Analysis is disabled automatically. The code will generate the schedule Excel files but will skip the statistical reports.
+Currently, reference data is available for: **Engineering faculty, B24 semester** (finals and midterms).
 
 ## Usage Examples
 
-### 1. Standard Final Exam Run (B24)
+### 1. Standard Final Exam Run (Engineering, B24)
 
 Runs optimization for 10 minutes (default) and generates a schedule.
 
 ```bash
-python main.py
+python -m src.main
 ```
 
-### 2. Final Demo 
+### 2. Final Demo
 
-Uses cached hints to generate a valid midterm schedule in ~10-30 seconds.
+Uses cached hints to generate a valid schedule in ~10-30 seconds.
 
 ```bash
-python main.py --demo
+python -m src.main --demo
 ```
 
 ### 3. Midterm Demo
 
-Uses cached hints to generate a valid midterm schedule in ~10-30 seconds.
-
 ```bash
-python main.py --midterm --demo
+python -m src.main --midterm --demo
 ```
 
-### 4. Run with New G25 Data
-
-Generates a schedule using the G25 course data (Analysis skipped).
+### 4. UBF Faculty, B24 Semester
 
 ```bash
-python main.py --G25
+python -m src.main --faculty ubf
 ```
 
-### 5. Re-Analyze an Old Experiment
-
-Regenerates the graphs and reports for experiment #3 (Finals) without running the solver again.
+### 5. Engineering, G25 Semester
 
 ```bash
-python main.py --analyze 3
+python -m src.main --semester G25
+```
+
+### 6. Re-Analyze an Old Experiment
+
+Regenerates the graphs and reports for experiment #3 without running the solver again.
+
+```bash
+python -m src.main --analyze 3
 ```
 
 ## Project Structure
 
-- `main.py`: The entry point. Handles argument parsing and orchestrates the flow.
-- `entities.py`: Data models (Course, Room, Department, TimeSlot).
-- `solver.py`: The core OR-Tools CP-SAT logic and constraints.
-- `reports.py`: Excel formatting and file generation logic.
-- `analytics.py`: Statistical analysis and plotting functions.
-- `utils.py`: Low-level file I/O and helper functions.
+```
+Campus-Scheduling/
+├── src/                    # Python source code
+│   ├── main.py             # CLI entry point and orchestration
+│   ├── config.py           # Config dataclass, path resolution, defaults
+│   ├── solver.py           # OR-Tools CP-SAT constraint logic
+│   ├── entities.py         # Data models (Course, Room, Department, TimeSlot)
+│   ├── reports.py          # Excel schedule generation and formatting
+│   ├── analytics.py        # Statistical analysis and plotting
+│   └── utils.py            # File I/O and helper functions
+├── data/
+│   ├── eng/                # Engineering faculty
+│   │   ├── rooms.xlsx      # Room data (shared across semesters)
+│   │   ├── B24/            # Semester data
+│   │   │   ├── courses.xlsx
+│   │   │   └── reference/  # Manual schedules for comparison
+│   │   └── G25/
+│   │       └── courses.xlsx
+│   ├── ubf/                # UBF faculty (same structure)
+│   ├── demo/               # Pre-computed warm-start solutions
+│   └── timetables/         # Midterm off-time timetable
+├── runs/                   # Experiment outputs
+├── requirements.txt
+└── README.md
+```

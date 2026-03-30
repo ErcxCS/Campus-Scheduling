@@ -1,42 +1,40 @@
 # Ignore everything
 **
 
-# Allow .py files
-!*.py
-
-# Allow directories to check for .py files
+# Allow directories to traverse
 !*/
 
-# Include the .gitignore file itself
+# Source code
+!*.py
+
+# Config & docs
 !.gitignore
-
-# Include requirements file
 !requirements.txt
+!*.md
+!*.json
 
-# xlsx files
+# Data files
 !*.xlsx
 !*.xls
+!data/
+!data/**
 
-# Optional: Ignore common Python cache files
+# Experiment outputs
+!runs/
+!runs/**
+
+# Source package
+!src/
+!src/**
+
+# Python cache
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
-# Do not ignore the data folder and its contents
-!data/
-!data/**
-
-# ignore virtual environment
+# Virtual environment
 env/
 env/**
-
-# ignore experiments?
-!runs/
-!runs/**
-
-# don't ignore demo variables
-!*.json
-
-# don't ignore readme
-!*.md
+venv/
+venv/**

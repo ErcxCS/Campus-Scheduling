@@ -3,8 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import seaborn as sns
-from entities import Course, Room
-from utils import read_fac_xlsxs, automated_df_rebuild
+from src.entities import Course, Room
+from src.utils import read_fac_xlsxs, automated_df_rebuild
 
 def get_concurrency_data(df, num_days):
     """
@@ -553,7 +553,7 @@ def get_daily_exam_counts(df: pd.DataFrame, is_midterm: bool):
 
     return daily_counts_dict
 
-def frequency_table2(experiment_no: int, exam: str, num_days):
+def frequency_table2(exp_path: str, reference_path: str, exam: str, num_days: int):
     import os
     import pandas as pd
     import matplotlib.pyplot as plt
@@ -562,7 +562,6 @@ def frequency_table2(experiment_no: int, exam: str, num_days):
     # ===============================
     # 1) LOAD BEAUTIFIED TIMETABLE
     # ===============================
-    exp_path = f"./runs/exp{experiment_no}_{exam[:-1]}"
     timetable_xlsx = "beautified_exam_schedule.xlsx"
     timetable_path = os.path.join(exp_path, timetable_xlsx)
     timetable_df = pd.read_excel(timetable_path, index_col=None, header=0)
@@ -575,7 +574,7 @@ def frequency_table2(experiment_no: int, exam: str, num_days):
     automated_df = pd.read_excel(automated_path, index_col=None, header=0)
 
     final_automated_df = automated_df_rebuild(automated_df, num_days)
-    final_automated_df.to_excel("faculty_schedule_automated_finals.xlsx")
+    final_automated_df.to_excel(os.path.join(exp_path, "faculty_schedule_automated_finals.xlsx"))
 
     # --- Sort automated timetable like manual ---
     automated_clean = final_automated_df.replace("", pd.NA)
@@ -589,7 +588,7 @@ def frequency_table2(experiment_no: int, exam: str, num_days):
         auto_final_df.replace("", pd.NA).notna().sum(axis=1).sort_values(ascending=False).index
 ]
 
-    auto_final_df.to_excel("faculty_schedule_automated_finals_sorted.xlsx")
+    auto_final_df.to_excel(os.path.join(exp_path, "faculty_schedule_automated_finals_sorted.xlsx"))
 
     # Compute usage for beautified schedule
     cols = timetable_df.columns.drop("Day")
@@ -603,8 +602,8 @@ def frequency_table2(experiment_no: int, exam: str, num_days):
     # ========================================================
     # 2) REBUILD TIMETABLE FROM MANUAL FACULTY SCHEDULE
     # ========================================================
-    path_in = "./data/B24_department_schedules_finals/faculty_schedule_manuel_finals.xlsx"
-    path_out = "./faculty_schedule_manuel_finals_timetable.xlsx"
+    path_in = os.path.join(reference_path, "faculty_schedule_manuel_finals.xlsx")
+    path_out = os.path.join(exp_path, "faculty_schedule_manuel_finals_timetable.xlsx")
 
     df = pd.read_excel(path_in)
 
@@ -764,19 +763,18 @@ def frequency_table2(experiment_no: int, exam: str, num_days):
     plt.show()
     print("Timetable saved to:", path_out)
 
-def frequency_table(experiment_no: int, exam: str, num_days: int):
+def frequency_table(exp_path: str, exam: str, num_days: int):
     import os
     import pandas as pd
     import numpy as np
     import matplotlib.pyplot as plt
     import seaborn as sns
     import ast
-    from entities import Room
+    from src.entities import Room
 
     # ===============================
     # 1. SETUP PATHS
     # ===============================
-    exp_path = f"./runs/exp{experiment_no}_{exam[:-1]}"
     plots_path = os.path.join(exp_path, "plots")
     os.makedirs(plots_path, exist_ok=True)
     
@@ -1010,16 +1008,19 @@ def merge_dfs(fac_df_manuel: pd.DataFrame, fac_df_out: pd.DataFrame, path) -> pd
     return merged
 
 
-def analysis(experiment_no: int, is_midterm: bool, num_days: int, dataset: str):
+def analysis(cfg):
     # Setup Paths
-    exam = "midterms" if is_midterm else "finals"
-    exp_path = f"./runs/exp{experiment_no}_{exam[:-1]}"
+    exam = "midterms" if cfg.is_midterm else "finals"
+    is_midterm = cfg.is_midterm
+    num_days = cfg.num_days
+    exp_path = str(cfg.exp_path())
+    reference_path = str(cfg.reference_path) if cfg.reference_path else None
     plots_path = os.path.join(exp_path, "plots")
     os.makedirs(plots_path, exist_ok=True)
 
     # 1. Load Raw Data & Create Merge
-    fac_df_manuel, fac_df_out = read_fac_xlsxs(experiment_no, exam, dataset)
-    
+    fac_df_manuel, fac_df_out = read_fac_xlsxs(exp_path, reference_path, exam)
+
     faculty_xlsx = "faculty_schedule2.xlsx"
     faculty_path = os.path.join(exp_path, faculty_xlsx)
     merged = merge_dfs(fac_df_manuel, fac_df_out, faculty_path)
@@ -1027,7 +1028,7 @@ def analysis(experiment_no: int, is_midterm: bool, num_days: int, dataset: str):
     # ==========================================
     # 2. FREQUENCY & HEATMAP ANALYSIS
     # ==========================================
-    frequency_table(experiment_no, exam, num_days)
+    frequency_table(exp_path, exam, num_days)
 
     # ==========================================
     # 3. PREPARE DATA FROM MERGED DF

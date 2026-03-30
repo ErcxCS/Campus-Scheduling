@@ -1,6 +1,9 @@
 import os
+from pathlib import Path
 import pandas as pd
 from openpyxl import load_workbook
+
+from src.config import DATA_DIR, RUNS_DIR
 
 def get_off_chunks(slot_list):
     """
@@ -43,10 +46,10 @@ def find_black_cells(file_path, sheet_name, slots_per_day, week_offset, off_time
     return off_timetable
 
 def midterm_timetable(slots_per_day: int = 9, num_days: int = 10):
-    midterm_tb_path = "./data/bahar_midterm.xlsx"
+    midterm_tb_path = str(DATA_DIR / "timetables" / "bahar_midterm.xlsx")
     horizon = slots_per_day * num_days
     off_timetable = {}
-    
+
     if os.path.exists(midterm_tb_path):
         off_timetable = find_black_cells(midterm_tb_path, 'first', slots_per_day, 0, off_timetable)
         off_timetable = find_black_cells(midterm_tb_path, 'second', slots_per_day, horizon // 2, off_timetable)
@@ -66,17 +69,13 @@ def read_dfs(schedules_path):
         dep_dfs[dep_code] = df
     return dep_dfs
 
-def read_fac_xlsxs(experiment_no: int, exam: str = None, dataset: str = "B24"):
-    exp_path = f"./runs/exp{experiment_no}_{exam[:-1]}"
-    
-    faculty_xlsx = "faculty_schedule.xlsx"
-    faculty_path = os.path.join(exp_path, faculty_xlsx)
+def read_fac_xlsxs(exp_path: str, reference_path: str, exam: str):
+    faculty_path = os.path.join(exp_path, "faculty_schedule.xlsx")
     fac_df_out = pd.read_excel(faculty_path, index_col=None, header=0)
 
-    df_path = f"./data/B24_department_schedules_{exam}"
-    faculty_path = os.path.join(df_path, f"faculty_schedule_manuel_2{exam}.xlsx")
-    fac_df_manuel = pd.read_excel(faculty_path, index_col=None, header=0)
-    
+    manuel_path = os.path.join(reference_path, f"faculty_schedule_manuel_2{exam}.xlsx")
+    fac_df_manuel = pd.read_excel(manuel_path, index_col=None, header=0)
+
     return fac_df_manuel, fac_df_out
 
 def compact_columns(df: pd.DataFrame) -> pd.DataFrame:

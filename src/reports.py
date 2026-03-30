@@ -3,8 +3,8 @@ import datetime
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
-from entities import Room, Course
-from utils import read_dfs
+from src.entities import Room, Course
+from src.utils import read_dfs
 
 
 def build_timetable(courses, rooms, horizon, n_days, solver, start_vars, in_room_vars, seat_vars, exp_path):
@@ -277,21 +277,17 @@ def unified_manuel_fac_schedule(dfs: dict, course_list: list):
         })
     return pd.DataFrame(data)
 
-def save_manuel_fac(df, exam):
-    df_path = "./data/B24_department_schedules_" + exam
-    os.makedirs(df_path, exist_ok=True)
-    fac_xslx_path = os.path.join(df_path, "faculty_schedule_manuel_2" + exam + ".xlsx")
+def save_manuel_fac(df, reference_path, exam):
+    os.makedirs(reference_path, exist_ok=True)
+    fac_xslx_path = os.path.join(reference_path, "faculty_schedule_manuel_2" + exam + ".xlsx")
     df.to_excel(fac_xslx_path, index=False)
 
-def generate_manuel_fac_(exp_no: int, is_midterm: bool):
+def generate_manuel_fac_(reference_path: str, is_midterm: bool):
     exam_str = "midterms" if is_midterm else "finals"
-    # Ensure correct path reading in utils
-    schedules_path = "./data/B24_department_schedules_" + exam_str
-    if os.path.exists(schedules_path):
-        # Uses read_dfs from utils (safe) and Course from entities (safe)
-        dfs = read_dfs(schedules_path)
+    if os.path.exists(reference_path):
+        dfs = read_dfs(reference_path)
         fac_df_manuel = unified_manuel_fac_schedule(dfs, Course.course_list)
-        save_manuel_fac(fac_df_manuel, exam_str)
+        save_manuel_fac(fac_df_manuel, reference_path, exam_str)
     else:
-        print(f"Warning: Path {schedules_path} not found.")
+        print(f"Warning: Path {reference_path} not found.")
         print("Skipping manual generation.")

@@ -2,10 +2,10 @@ from xml.parsers.expat import model
 
 from ortools.sat.python import cp_model
 import os
-from entities import Course, Room, Department, TimeSlot
-from utils import get_off_chunks
-from reports import build_timetable, department_exam_schedule, faculty_exam_schedule, excelify
-from analytics import mission_report
+from src.entities import Course, Room, Department, TimeSlot
+from src.utils import get_off_chunks
+from src.reports import build_timetable, department_exam_schedule, faculty_exam_schedule, excelify
+from src.analytics import mission_report
 import json
 
 
@@ -55,10 +55,12 @@ def load_demo_hints(path, model, start_vars, in_room_vars):
     return True
 
 
-def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int,
-                         slots_per_day: int, timeout: int = 600,
-                         runs_path: str = "./runs", demo_mode: bool = False,
-                         dataset_name: str = "B24"):
+def exam_scheduling_main(cfg):
+    is_midterm = cfg.is_midterm
+    num_days = cfg.num_days
+    slots_per_day = cfg.slots_per_day
+    timeout = cfg.timeout
+    demo_mode = cfg.is_demo
 
     horizon = num_days * slots_per_day
     model = cp_model.CpModel()
@@ -377,8 +379,8 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int,
         room_usage = [in_room[(e.id, r.id)] for e in Course.course_list for r in Room.room_list]
         model.Minimize(sum(room_usage))
 
-    exam_type_str = "midterm" if is_midterm else "final"
-    demo_filename = f"demo_{exam_type_str}_{dataset_name}.json"
+    demo_filename = str(cfg.demo_path)
+    success = False
 
     if demo_mode:
         print("Loading variables...")
@@ -400,8 +402,7 @@ def exam_scheduling_main(experiment_no: int, is_midterm: bool, num_days: int,
         if not demo_mode:
             save_demo_data(demo_filename, start, in_room, solver)
 
-        exam_type = "_midterm" if is_midterm else "_final"
-        exp_path = os.path.join(runs_path, "exp" + str(experiment_no) + exam_type)
+        exp_path = str(cfg.exp_path())
         os.makedirs(exp_path, exist_ok=True)
 
         build_timetable(Course.course_list, Room.room_list, horizon, num_days, solver, start, in_room, seat, exp_path)

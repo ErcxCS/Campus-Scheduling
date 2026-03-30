@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from utils import midterm_timetable
+from src.utils import midterm_timetable
 
 class Department:
     departments = []
@@ -82,8 +82,6 @@ class Course:
             department_name = row["DepartmentName"]
             course_code = row["CourseCode"]
             course_name = row["CourseName"]
-            akts = row["AKTS"]
-            credit = row["KREDI"]
             requires_lab = row["Lab"]
             year = row["SINIF"]
             mandatory = row["ZOR_SEC"]
