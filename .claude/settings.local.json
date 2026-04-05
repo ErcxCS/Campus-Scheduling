@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc:*)",
+      "Bash(python3 -m json.tool)",
+      "Bash(find . -type f \\\\\\(-name *.py -o -name *.json \\\\\\))",
+      "Bash(mkdir -p src)",
+      "Bash(mkdir -p data/eng/reference/B24_finals)",
+      "Bash(mkdir -p data/eng/reference/B24_midterms)",
+      "Bash(mkdir -p data/ubf)",
+      "Bash(mkdir -p data/demo)",
+      "Bash(mkdir -p runs/archived)",
+      "Bash(mv faculty_schedule_automated_finals.xlsx faculty_schedule_automated_finals_sorted.xlsx faculty_schedule_manuel_finals_timetable.xlsx runs/archived/)",
+      "Bash(mv data/UBF_course_data_RAW.xlsx data/ubf/courses_B24_RAW.xlsx)",
+      "Bash(mv data/UBF_course_data_old.xlsx data/ubf/courses_B24_old.xlsx)",
+      "Bash(mv data/UBF_Derslik_Kapasiteleri.docx data/ubf/)",
+      "Bash(rm -rf \"data/eng/reference/B24_finals\" \"data/eng/reference/B24_midterms\")",
+      "Bash(mkdir -p \"data/eng/reference/B24_finals\" \"data/eng/reference/B24_midterms\")",
+      "Bash(powershell -Command \"Get-ChildItem ''data\\\\eng\\\\reference\\\\B24_finals'' | Select-Object Name\")",
+      "Bash(cd:*)",
+      "Bash(python -c \"from src.config import Config; print\\(''config OK''\\)\")",
+      "Bash(python -c \"from src.main import parse_arguments; print\\(''main OK''\\)\")",
+      "Bash(python -m src.main --demo)",
+      "Bash(python -c \"import pandas as pd; df = pd.read_excel\\(''data/eng/courses_B24.xlsx''\\); print\\(df.columns.tolist\\(\\)\\)\")",
+      "Bash(mkdir -p data/eng/B24/reference/finals data/eng/B24/reference/midterms)",
+      "Bash(powershell -Command \"Copy-Item -Path ''data\\\\eng\\\\reference\\\\B24_finals\\\\*'' -Destination ''data\\\\eng\\\\B24\\\\reference\\\\finals\\\\'' -Recurse -Force; Copy-Item -Path ''data\\\\eng\\\\reference\\\\B24_midterms\\\\*'' -Destination ''data\\\\eng\\\\B24\\\\reference\\\\midterms\\\\'' -Recurse -Force\")"
+    ]
+  }
+}
